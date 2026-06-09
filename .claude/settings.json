@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:4319/hook -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:4319/hook -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:4319/hook -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -m 1 -X POST http://127.0.0.1:4319/hook -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

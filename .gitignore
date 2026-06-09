@@ -3,3 +3,10 @@ node_modules/
 dist/
 *.log
 像素狗狗动作帧/_backup_before_center_align/
+
+# Unrelated pet-generation experiments that pre-existed in this folder
+# (kept on disk, just not part of this project's repo)
+make_mochi_pet.py
+mochi_pet_run/
+mochi_pixel_pet_run/
+pixel_girl_pet_run/
