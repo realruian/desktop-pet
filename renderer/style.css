@@ -1,0 +1,27 @@
+/* style.css — transparent, full-bleed canvas; no native drag regions. */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* Kill text/element selection and the browser's native image-drag ghost so
+   pointer drags belong entirely to our manual drag logic. */
+* {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Canvas fills the window. `pixelated` keeps the pixel-art crisp when scaled. */
+#stage {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  image-rendering: pixelated;
+}
