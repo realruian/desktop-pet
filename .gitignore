@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+dist/
+*.log
+像素狗狗动作帧/_backup_before_center_align/

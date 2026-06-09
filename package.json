@@ -1,0 +1,13 @@
+{
+  "name": "corgi-desktop-pet",
+  "version": "0.1.0",
+  "description": "A cute pixel corgi desktop pet for macOS (Electron): draggable, wanders randomly, transparent click-through window.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
