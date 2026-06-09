@@ -318,7 +318,7 @@ canvas.addEventListener('pointermove', (e) => {
   updateInteractivity();
 });
 
-canvas.addEventListener('pointerdown', async (e) => {
+canvas.addEventListener('pointerdown', (e) => {
   // Only the left button initiates a drag/tap; ignore otherwise.
   if (e.button !== 0) return;
   if (!isOverBody(e.clientX, e.clientY)) return;
@@ -336,9 +336,12 @@ canvas.addEventListener('pointerdown', async (e) => {
   window.pet.setIgnore(false);
 
   // Grab offset = cursor minus current window top-left, so the dog stays put
-  // relative to the cursor for the duration of the drag.
-  const [wx, wy] = await window.pet.getPos();
-  grab = { x: e.screenX - wx, y: e.screenY - wy };
+  // relative to the cursor for the duration of the drag. We read it
+  // synchronously from our locally-tracked position (the window is only ever
+  // moved by our own moveTo, so state.pos is authoritative) — avoiding an async
+  // getPos() round-trip that a fast first pointermove could otherwise beat,
+  // which would jump the window for one frame.
+  grab = { x: e.screenX - state.pos.x, y: e.screenY - state.pos.y };
 });
 
 async function endDrag(e) {
