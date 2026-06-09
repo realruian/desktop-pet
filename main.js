@@ -16,6 +16,13 @@ let win = null;
 // behavior pause lives in the renderer; this only drives the menu text.
 let isPaused = false;
 
+// Cursor polling: feed the renderer the global cursor position so the resting
+// dog's eyes can track it. setInterval id (cleared on window close).
+let cursorTimer = null;
+// Last position we pushed; skip identical sends to keep IPC quiet.
+let lastSentCursor = { x: null, y: null };
+const CURSOR_POLL_MS = 33; // ~30 Hz, matches the eyes' per-frame recompute
+
 function createWindow() {
   win = new BrowserWindow({
     width: WIN,
@@ -53,7 +60,25 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // Start cursor polling only once the renderer is up and listening, so early
+  // 'cursor' sends aren't dropped. Poll the global cursor position and forward
+  // it; skip sends when it hasn't moved.
+  win.webContents.on('did-finish-load', () => {
+    if (cursorTimer) clearInterval(cursorTimer);
+    cursorTimer = setInterval(() => {
+      if (!win) return;
+      const { x, y } = screen.getCursorScreenPoint();
+      if (x === lastSentCursor.x && y === lastSentCursor.y) return;
+      lastSentCursor = { x, y };
+      win.webContents.send('cursor', { x, y });
+    }, CURSOR_POLL_MS);
+  });
+
   win.on('closed', () => {
+    if (cursorTimer) {
+      clearInterval(cursorTimer);
+      cursorTimer = null;
+    }
     win = null;
   });
 }

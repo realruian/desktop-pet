@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('pet', {
   getCursor: () => ipcRenderer.invoke('get-cursor'), // -> {x, y}
   getWorkArea: () => ipcRenderer.invoke('get-work-area'), // -> {x, y, width, height}
 
-  // Main → renderer push (menu commands) -------------------------------------
+  // Main → renderer push -----------------------------------------------------
   onMenuCommand: (cb) => ipcRenderer.on('menu-command', (_e, c) => cb(c)),
+  // Global cursor position in screen points, polled by main (~30 Hz). Drives
+  // the resting dog's gaze tracking.
+  onCursor: (cb) => ipcRenderer.on('cursor', (_e, p) => cb(p)),
 });
