@@ -15,9 +15,14 @@
 
 // ---- Constants --------------------------------------------------------------
 
-const WIN = 200; // window + drawn-canvas size (square), matches main.js
+const WIN = 160; // window + drawn-canvas size (square), matches main.js
 const SRC = 420; // source frame size (px)
 const WALK_SPEED = 150; // px/s while walking
+
+// Autonomous wandering. false = the dog stays put in one spot (active bursts use
+// only in-place animations); it never walks the window across the screen on its
+// own. You can always still drag it yourself. Set true to re-enable roaming.
+const WANDER = false;
 const ALPHA_THRESHOLD = 30; // alpha above this counts as "over the body"
 const TAP_SLOP = 4; // px of movement below which a press counts as a tap
 const RESUME_DELAY = 600; // ms to wait after a real drag before resting again
@@ -57,9 +62,11 @@ const CLIPS = {
   eyes: { fps: 1, frames: 9, faces: 'front' }, // REST; gaze-driven, see drawRest
 };
 
-// Weighted activity picks for an ACTIVE-phase burst.
+// Weighted activity picks for an ACTIVE-phase burst. `walk` (the only activity
+// that moves the window) is included only when WANDER is on; otherwise the dog
+// stays put and an active burst is just an in-place animation.
 const ACTIVITY_WEIGHTS = [
-  { name: 'walk', weight: 45 },
+  ...(WANDER ? [{ name: 'walk', weight: 45 }] : []),
   { name: 'scratch', weight: 18 },
   { name: 'bark', weight: 18 },
   { name: 'roll', weight: 19 },

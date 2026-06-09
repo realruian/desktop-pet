@@ -10,7 +10,7 @@ const http = require('http');
 const { execFile } = require('child_process');
 
 // Window is a WIN×WIN square; the canvas inside is drawn at this size.
-const WIN = 200;
+const WIN = 160;
 
 // Loopback port for the Claude Code hook server (section D). Claude Code's hooks
 // POST their JSON payloads here; we forward the event to the renderer so the pet
