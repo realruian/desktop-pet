@@ -28,7 +28,9 @@ const PERSONA =
   '你是住在 macOS 桌面右下角的像素柯基桌宠。性格活泼、粘人、有点小机灵。' +
   '用中文口语回复，简短（一般不超过三句），偶尔带一声「汪！」或可爱的语气词。' +
   '你会的本领：被主人拖来拖去、眼睛跟着鼠标转、显示 Claude Code 任务进度、' +
-  '接住拖给你的文件帮主人打开终端。不要用 Markdown 标题或长列表，自然聊天即可。';
+  '接住拖给你的文件帮主人打开终端、翻主人的 Obsidian 笔记帮忙回忆和回答。' +
+  '如果消息里附了「主人的笔记片段」，优先依据它回答并自然提到出自哪篇笔记；' +
+  '笔记里没有的就老实说没翻到。不要用 Markdown 标题或长列表，自然聊天即可。';
 
 /** @type {BrowserWindow|null} */
 let win = null;
@@ -242,13 +244,17 @@ ipcMain.on('open-in-claude', (_e, p) => {
 // the main process; the chat renderer only ever sees message text.
 
 // Read config.json fresh on every use, so filling in the API key takes effect
-// without restarting the pet. Env vars override (handy for tests):
-//   PET_KIMI_KEY / PET_KIMI_BASE / PET_KIMI_MODEL
+// without restarting the pet. Works with any OpenAI-compatible endpoint
+// (OpenRouter, Moonshot direct, …). Env vars override (handy for tests):
+//   PET_KIMI_KEY / PET_KIMI_BASE / PET_KIMI_MODEL / PET_OBSIDIAN_VAULT
 function loadKimiConfig() {
   let cfg = {};
+  let obsidian = {};
   try {
     const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
-    cfg = (JSON.parse(raw) || {}).kimi || {};
+    const parsed = JSON.parse(raw) || {};
+    cfg = parsed.kimi || {};
+    obsidian = parsed.obsidian || {};
   } catch (_) {
     /* missing/malformed config.json → fall back to env/defaults */
   }
@@ -259,7 +265,142 @@ function loadKimiConfig() {
       cfg.baseURL ||
       'https://api.moonshot.cn/v1',
     model: process.env.PET_KIMI_MODEL || cfg.model || 'kimi-latest',
+    vault: process.env.PET_OBSIDIAN_VAULT || obsidian.vault || '',
   };
+}
+
+// ---- Obsidian retrieval (section F) -----------------------------------------
+//
+// Lightweight local RAG: before each chat turn we scan the vault's markdown for
+// the question's terms and attach the best few snippets as reference context.
+// Pure filesystem — no index, no network; 500-odd notes scan in well under a
+// second. All failures degrade to "no notes attached".
+
+const VAULT_MAX_FILES = 4000; // hard cap on files considered per query
+const VAULT_MAX_BYTES = 200 * 1024; // skip md files bigger than this (blobs)
+const VAULT_TOP_NOTES = 4; // how many notes to quote
+const VAULT_SNIPPET_CHARS = 420; // chars of context per note
+const VAULT_BLOCK_CHARS = 2000; // total budget for the reference block
+
+// Tokenize a query for matching: latin words (≥2 chars, lowercased) + CJK
+// bigrams (every adjacent pair inside each CJK run — robust without a real
+// Chinese segmenter) + the full CJK runs themselves for exact-phrase boosts.
+function vaultTokens(query) {
+  const tokens = new Map(); // token -> weight
+  const add = (t, w) => {
+    if (t) tokens.set(t, Math.max(tokens.get(t) || 0, w));
+  };
+  for (const m of query.toLowerCase().matchAll(/[a-z0-9][a-z0-9_-]+/g)) {
+    add(m[0], 2);
+  }
+  for (const m of query.matchAll(/[一-鿿]{2,}/g)) {
+    const run = m[0];
+    add(run, 4); // whole phrase: strong signal
+    for (let i = 0; i + 2 <= run.length; i++) add(run.slice(i, i + 2), 1);
+  }
+  return tokens;
+}
+
+function countHits(haystack, needle) {
+  let n = 0;
+  for (
+    let i = haystack.indexOf(needle);
+    i !== -1 && n < 5; // cap per-token contribution
+    i = haystack.indexOf(needle, i + needle.length)
+  ) {
+    n++;
+  }
+  return n;
+}
+
+// Recursively list candidate .md files (skips dot-dirs like .obsidian/.trash
+// and Excalidraw drawing files, which are JSON blobs in md clothing).
+async function vaultListMd(root) {
+  const out = [];
+  const walk = async (dir) => {
+    if (out.length >= VAULT_MAX_FILES) return;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= VAULT_MAX_FILES) return;
+      if (e.name.startsWith('.')) continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.name.endsWith('.md') && !e.name.endsWith('.excalidraw.md'))
+        out.push(p);
+    }
+  };
+  await walk(root);
+  return out;
+}
+
+// Search the vault for `query`; resolve to a reference block ('' if nothing
+// relevant). Never rejects.
+async function searchVault(vault, query) {
+  try {
+    if (!vault || !fs.existsSync(vault)) return '';
+    const tokens = vaultTokens(query);
+    if (tokens.size === 0) return '';
+    const files = await vaultListMd(vault);
+
+    const scored = [];
+    const BATCH = 64;
+    for (let i = 0; i < files.length; i += BATCH) {
+      await Promise.all(
+        files.slice(i, i + BATCH).map(async (p) => {
+          let text;
+          try {
+            const st = await fs.promises.stat(p);
+            if (st.size > VAULT_MAX_BYTES) return;
+            text = await fs.promises.readFile(p, 'utf8');
+          } catch (_) {
+            return;
+          }
+          const name = path.basename(p, '.md');
+          const lower = text.toLowerCase();
+          let score = 0;
+          let bestToken = null;
+          let bestW = 0;
+          for (const [t, w] of tokens) {
+            const inName = countHits(name.toLowerCase(), t);
+            const inBody = countHits(lower, t);
+            if (inName + inBody === 0) continue;
+            score += w * (inBody + inName * 4); // filename hits weigh extra
+            if (w > bestW && inBody > 0) {
+              bestW = w;
+              bestToken = t;
+            }
+          }
+          if (score > 0) scored.push({ p, name, text, lower, score, bestToken });
+        })
+      );
+    }
+    if (scored.length === 0) return '';
+    scored.sort((a, b) => b.score - a.score);
+
+    const parts = [];
+    let budget = VAULT_BLOCK_CHARS;
+    for (const s of scored.slice(0, VAULT_TOP_NOTES)) {
+      if (budget <= 0) break;
+      // Snippet: a window around the strongest in-body match (else the head).
+      const at = s.bestToken ? s.lower.indexOf(s.bestToken) : 0;
+      const start = Math.max(0, at - Math.floor(VAULT_SNIPPET_CHARS / 3));
+      const snip = s.text
+        .slice(start, start + VAULT_SNIPPET_CHARS)
+        .replace(/\s+/g, ' ')
+        .trim();
+      const piece = '《' + s.name + '》' + (start > 0 ? '…' : '') + snip;
+      parts.push(piece.slice(0, budget));
+      budget -= piece.length;
+    }
+    return parts.join('\n---\n');
+  } catch (_) {
+    return '';
+  }
 }
 
 function createChatWindow() {
@@ -325,13 +466,13 @@ ipcMain.on('chat-hide', () => {
 // ({role:'user'|'assistant', content} only — we prepend the persona here).
 // Resolves {ok:true, content} | {ok:false, error}; never throws to the caller.
 ipcMain.handle('chat-send', async (_e, messages) => {
-  const { apiKey, baseURL, model } = loadKimiConfig();
+  const { apiKey, baseURL, model, vault } = loadKimiConfig();
   if (!apiKey) {
     return {
       ok: false,
       error:
-        '还没配置 Kimi API Key：把项目里的 config.example.json 复制为 ' +
-        'config.json，填入你的 Moonshot Key（sk- 开头）即可，无需重启。',
+        '还没配置 API Key：把项目里的 config.example.json 复制为 config.json，' +
+        '填入你的 Key（OpenRouter 或 Moonshot 均可）即可，无需重启。',
     };
   }
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -346,6 +487,23 @@ ipcMain.handle('chat-send', async (_e, messages) => {
     )
     .map((m) => ({ role: m.role, content: m.content }));
 
+  // Obsidian retrieval: look up the latest user question in the vault and, on
+  // a hit, attach the snippets as reference context (system message).
+  const system = [{ role: 'system', content: PERSONA }];
+  const lastUser = [...sane].reverse().find((m) => m.role === 'user');
+  if (vault && lastUser) {
+    const notes = await searchVault(vault, lastUser.content);
+    if (notes) {
+      system.push({
+        role: 'system',
+        content:
+          '主人的笔记片段（从 Obsidian 检索，可能不完整；与问题相关时优先依据它回答，' +
+          '并自然提到笔记标题）：\n' +
+          notes,
+      });
+    }
+  }
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
   try {
@@ -357,7 +515,7 @@ ipcMain.handle('chat-send', async (_e, messages) => {
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: PERSONA }, ...sane],
+        messages: [...system, ...sane],
         temperature: 0.6,
         max_tokens: 1024,
       }),

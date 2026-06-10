@@ -68,7 +68,9 @@ async function sendMessage() {
   sendEl.disabled = false;
 
   if (res && res.ok) {
-    addBubble('dog', res.content);
+    // The model occasionally slips in markdown bold; bubbles are plain text,
+    // so strip the markers for display (history keeps the original).
+    addBubble('dog', res.content.replace(/\*\*(.+?)\*\*/g, '$1'));
     history.push({ role: 'assistant', content: res.content });
   } else {
     // Errors render as a distinct bubble and are NOT added to history, so a

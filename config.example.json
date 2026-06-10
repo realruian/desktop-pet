@@ -1,7 +1,12 @@
 {
   "kimi": {
-    "apiKey": "把这里替换成你的 Moonshot API Key（sk- 开头，https://platform.moonshot.cn 获取）",
-    "model": "kimi-latest",
-    "baseURL": "https://api.moonshot.cn/v1"
+    "apiKey": "你的 API Key：OpenRouter（sk-or- 开头，https://openrouter.ai）或 Moonshot 直连（https://platform.moonshot.cn）均可",
+    "model": "moonshotai/kimi-k2.5",
+    "baseURL": "https://openrouter.ai/api/v1",
+    "_说明": "用 Moonshot 直连时改为 model: kimi-latest, baseURL: https://api.moonshot.cn/v1"
+  },
+  "obsidian": {
+    "vault": "/Users/你的用户名/path/to/你的Obsidian库",
+    "_说明": "填了这个，柯基聊天时会自动检索库里的笔记作为参考来回答；留空或删掉则不启用"
   }
 }
