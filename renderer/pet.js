@@ -72,6 +72,26 @@ const CLAUDE_GLYPH = {
 const CLAUDE_DONE_GLYPH_MS = 1500; // how long the ✅ shows on completion
 const CLAUDE_DONE_CLEAR_MS = 4000; // when 'done' clears → scheduler resumes
 
+// Mini progress bar (section D): a very small pill floating above the dog's head
+// that reflects the live task. Claude Code exposes no true "percent done", so we
+// ease toward an HONEST effort estimate — elapsed time + completed tool calls —
+// that asymptotes to a cap BELOW 100% while still working, then snaps to full
+// only when the task actually ends (Stop). So the bar always moves, never lies
+// about being finished, and completing it is a real signal.
+const PROG_W = 64; // bar width (WIN-space px)
+const PROG_H = 5; // bar height
+const PROG_Y = 14; // bar center y (sits above the head)
+const PROG_WORK_CAP = 0.9; // never fill past this while still working
+const PROG_TIME_TAU = 28; // s — elapsed-time contribution constant
+const PROG_TOOL_TAU = 7; // completed tool calls contribution constant
+const PROG_EASE = 6; // per-second lerp rate of displayed → target
+const PROG_FADE_MS = 450; // bar fade-out after the ✅ hold
+const PROG_COLOR = {
+  working: '#7aa2ff', // calm blue — in progress
+  waiting: '#ffcc66', // amber — needs you
+  done: '#5fd07a', // green — complete
+};
+
 // Animation clips: frame count + playback fps. Art faces LEFT by default.
 // (REST uses the separately-loaded, gaze-named `images.eyes` set — see below.)
 const CLIPS = {
@@ -190,6 +210,11 @@ const claude = {
   status: 'idle', // 'idle' | 'working' | 'waiting' | 'done'
   glyphUntil: 0, // performance.now() ms until which the glyph is drawn
   clearTimer: null, // setTimeout id that returns 'done' → idle
+  // Mini progress bar bookkeeping (see PROG_* constants):
+  progress: 0, // displayed fill [0,1], eased toward `target`
+  target: 0, // current effort-estimate target [0,1]
+  workStart: 0, // performance.now() when the current task began
+  toolCount: 0, // completed tool calls in the current task
 };
 
 // True while a file/folder is being dragged over the dog (section E): show a
@@ -363,6 +388,23 @@ function drawFrame(now, dt) {
   if (scaled) ctx.restore();
 }
 
+// Advance the mini progress bar. While 'working' the target eases toward an
+// asymptotic effort estimate (elapsed time + tool calls), capped below 100%; on
+// 'waiting' it freezes (we're blocked on the user); on 'done' it completes. The
+// displayed value always lerps toward the target so the bar glides smoothly.
+function updateClaudeProgress(now, dt) {
+  if (claude.status === 'working') {
+    const elapsed = (now - claude.workStart) / 1000;
+    const effort = elapsed / PROG_TIME_TAU + claude.toolCount / PROG_TOOL_TAU;
+    claude.target = PROG_WORK_CAP * (1 - Math.exp(-effort));
+  } else if (claude.status === 'done') {
+    claude.target = 1;
+  }
+  // 'waiting' leaves target untouched (frozen); 'idle' isn't drawn.
+  const k = Math.min(1, dt * PROG_EASE);
+  claude.progress += (claude.target - claude.progress) * k;
+}
+
 // Draw the status / drop glyphs as an OVERLAY, after the click-through hit-test
 // has already sampled the (glyph-free) dog. Keeping glyphs out of the hit-test
 // means the small emoji floating by the dog's head never become draggable nor
@@ -382,6 +424,57 @@ function drawOverlay(now) {
     ctx.textBaseline = 'middle';
     // Top-right of the dog's head; fixed in canvas (window) space.
     ctx.fillText(glyph, WIN - 22, 24);
+    ctx.restore();
+  }
+
+  // Mini progress bar: floats above the head while a task is live, then briefly
+  // fades on completion. Drawn here in the overlay so it never affects the
+  // click-through hit-test. Fill width = eased progress; color encodes state.
+  let barAlpha = 0;
+  if (claude.status === 'working') {
+    barAlpha = 1;
+  } else if (claude.status === 'waiting') {
+    barAlpha = 0.75 + 0.25 * (0.5 + 0.5 * Math.sin(now / 320)); // attention pulse
+  } else if (claude.status === 'done') {
+    if (now < claude.glyphUntil) barAlpha = 1;
+    else if (now < claude.glyphUntil + PROG_FADE_MS)
+      barAlpha = 1 - (now - claude.glyphUntil) / PROG_FADE_MS;
+  }
+  if (barAlpha > 0.01) {
+    const x = (WIN - PROG_W) / 2;
+    const y = PROG_Y - PROG_H / 2;
+    const r = PROG_H / 2;
+    ctx.save();
+    ctx.globalAlpha = barAlpha;
+
+    // Track.
+    ctx.beginPath();
+    ctx.roundRect(x, y, PROG_W, PROG_H, r);
+    ctx.fillStyle = 'rgba(16,16,22,0.55)';
+    ctx.fill();
+
+    // Fill (keep a visible rounded cap once any progress exists).
+    const p = clamp(claude.progress, 0, 1);
+    const fillW = p > 0 ? Math.max(PROG_H, PROG_W * p) : 0;
+    if (fillW > 0) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, fillW, PROG_H, r);
+      ctx.fillStyle = PROG_COLOR[claude.status] || PROG_COLOR.working;
+      ctx.fill();
+
+      // Subtle sweeping sheen so 'working' feels alive even near the cap.
+      if (claude.status === 'working') {
+        const sx = x + ((now / 1100) % 1) * fillW;
+        const g = ctx.createLinearGradient(sx - 9, 0, sx + 9, 0);
+        g.addColorStop(0, 'rgba(255,255,255,0)');
+        g.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.beginPath();
+        ctx.roundRect(x, y, fillW, PROG_H, r);
+        ctx.fillStyle = g;
+        ctx.fill();
+      }
+    }
     ctx.restore();
   }
 
@@ -420,7 +513,9 @@ function loop(now) {
   // 4) Draw, then re-test click-through against the (possibly moved) sprite.
   drawFrame(now, dt);
   updateInteractivity();
-  // 5) Glyph overlay last, so it never participates in the hit-test above.
+  // 5) Advance the progress bar, then draw the glyph + bar overlay last so they
+  //    never participate in the hit-test above.
+  updateClaudeProgress(now, dt);
   drawOverlay(now);
 
   requestAnimationFrame(loop);
@@ -738,6 +833,7 @@ function enterClaudeHold() {
 // working/waiting hold.
 function fireClaudeDone() {
   claude.status = 'done';
+  claude.target = 1; // drive the mini progress bar to full
   claude.glyphUntil = performance.now() + CLAUDE_DONE_GLYPH_MS;
   clearTimeout(state.phaseTimer);
   clearTimeout(state.resumeTimer);
@@ -757,11 +853,32 @@ function fireClaudeDone() {
   }, CLAUDE_DONE_CLEAR_MS);
 }
 
+// Restart the mini progress bar from empty for a fresh task.
+function resetClaudeProgress() {
+  claude.progress = 0;
+  claude.target = 0;
+  claude.toolCount = 0;
+  claude.workStart = performance.now();
+}
+
 window.pet.onClaudeEvent(({ event }) => {
   switch (event) {
     case 'UserPromptSubmit':
       claude.status = 'working';
+      resetClaudeProgress(); // fresh task → bar starts at 0
       enterClaudeHold();
+      break;
+    case 'PostToolUse':
+      // Each completed tool call nudges the effort estimate forward. If we never
+      // saw the task start (pet launched mid-task), begin a fresh working bar.
+      if (claude.status !== 'working' && claude.status !== 'waiting') {
+        claude.status = 'working';
+        resetClaudeProgress();
+        enterClaudeHold();
+      } else if (claude.status === 'waiting') {
+        claude.status = 'working'; // a tool ran after approval → back to work
+      }
+      claude.toolCount += 1;
       break;
     case 'Notification':
       claude.status = 'waiting';

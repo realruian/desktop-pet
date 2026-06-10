@@ -235,7 +235,9 @@ function startClaudeServer() {
             /* malformed payload → just ack below, nothing to forward */
           }
           if (event) {
-            console.log('[claude] ' + event);
+            // PostToolUse fires on every tool call (it drives the pet's mini
+            // progress bar); don't spam the log with each one.
+            if (event !== 'PostToolUse') console.log('[claude] ' + event);
             if (win && !win.isDestroyed()) {
               win.webContents.send('claude-event', { event, cwd });
             }
