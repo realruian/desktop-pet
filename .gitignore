@@ -1,12 +1,32 @@
+# ── 依赖与构建产物 ────────────────────────────────────────────
 node_modules/
-.DS_Store
 dist/
-*.log
-像素狗狗动作帧/_backup_before_center_align/
+build/
+out/
 
-# Unrelated pet-generation experiments that pre-existed in this folder
-# (kept on disk, just not part of this project's repo)
-make_mochi_pet.py
+# ── PyInstaller / 像素动画生成实验的运行输出（体积大、与本项目无关）──
+*_run/
 mochi_pet_run/
 mochi_pixel_pet_run/
 pixel_girl_pet_run/
+make_mochi_pet.py
+*.spec
+
+# ── Python 缓存与虚拟环境 ─────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── 原始动画帧 dump（仅作素材留档；App 实际加载的是 assets/）──────
+像素狗狗动作帧/
+
+# ── 环境变量与密钥 ────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+
+# ── 日志与系统文件 ────────────────────────────────────────────
+*.log
+.DS_Store

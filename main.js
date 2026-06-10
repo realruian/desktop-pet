@@ -77,6 +77,34 @@ function createWindow() {
   // 'cursor' sends aren't dropped. Poll the global cursor position and forward
   // it; skip sends when it hasn't moved.
   win.webContents.on('did-finish-load', () => {
+    // DEBUG-ONLY (env-gated): force each of the 9 gaze frames in turn by injecting
+    // the cursor angle that selects it (inverse of gazeFrameIndex), and snapshot —
+    // to read each frame's TRUE gaze direction. Skips the real poll. Not for normal use.
+    if (process.env.PET_DUMP) {
+      const fs = require('fs');
+      const b = win.getBounds();
+      const cx0 = b.x + b.width / 2;
+      const cy0 = b.y + b.height / 2;
+      const R = 400;
+      let i = 0;
+      const t = setInterval(() => {
+        if (!win || i >= 9) return clearInterval(t);
+        const a = (i * 40 * Math.PI) / 180; // angle that gazeFrameIndex maps to idx i
+        const x = Math.round(cx0 + R * Math.cos(a));
+        const y = Math.round(cy0 - R * Math.sin(a)); // matches the -(y-cy) in the formula
+        win.webContents.send('cursor', { x, y });
+        const idx = i;
+        setTimeout(async () => {
+          try {
+            fs.writeFileSync(`/tmp/fr_${idx}.png`, (await win.capturePage()).toPNG());
+          } catch (e) {}
+          console.log(`[dump] idx ${idx} via cursor ${x},${y}`);
+        }, 280);
+        i++;
+      }, 650);
+      return; // do not start the real poll in dump mode
+    }
+
     if (cursorTimer) clearInterval(cursorTimer);
     cursorTimer = setInterval(() => {
       if (!win) return;

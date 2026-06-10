@@ -1,79 +1,85 @@
-# 🐕 柯基桌宠 (Corgi Desktop Pet)
+# 🐕 桌宠 / Mochi Pet（`desktop-pet`）
 
-一只基于像素素材做的 Mac 桌面宠物：**固定待在一个地方**，安静休息（带呼吸感）、**眼睛跟随鼠标**、偶尔原地做个小动作，**可以拖动**；还能**接入 Claude Code 显示任务状态**，以及**把文件拖给它一键在终端启动 Claude Code**。窗口透明、无边框、永远置顶，空白处点击穿透到下面的应用。
+一只住在 Mac 桌面右下角的像素柯基：安静休息、**眼睛跟随你的鼠标**、偶尔做个小动作、可以随手拖动；还能**接入 Claude Code 实时显示任务状态**，并支持**把文件/文件夹拖给它一键在终端启动 Claude Code**。
 
 ![corgi](主图.png)
 
-## 运行
+## 背景 / 动机
+
+每天对着终端跑 Claude Code，长任务一跑就是几十分钟，盯着滚动的日志既累又容易分神。于是给自己做了个「会陪着我」的桌面伙伴：
+
+- 平时它就安安静静趴在屏幕角落，眼睛跟着鼠标转，存在感低但有温度；
+- 一旦本项目里的 Claude Code 开始干活、需要确认、或任务完成，它会**用表情和系统通知第一时间告诉我**，不用再频繁切窗口盯日志；
+- 想开一个新任务时，直接把文件夹拖到它身上，终端就自动 `cd` 过去把 `claude` 拉起来。
+
+它把「桌面萌宠」和「开发工作流状态指示器」缝在了一起——既是玩具，也是趁手的小工具。
+
+## 核心功能
+
+| 能力 | 说明 |
+| --- | --- |
+| 😌 **安静休息（约 50% 时间）** | 大部分时间坐着不动，带轻微**呼吸**起伏；眼睛**跟随鼠标**转动（9 帧、约 40° 一档，切换有淡入） |
+| 🐾 **原地小动作** | 休息一阵后做 1–2 个原地动作（挠头 / 叫 / 躺下打滚），然后继续休息。默认**不自己乱跑**，想让它溜达把 `pet.js` 里的 `WANDER` 改 `true` |
+| 🖱️ **拖动 & 轻点** | 按住身体 1:1 跟手拖到任意位置；轻点一下它会「汪」一声 |
+| 🫥 **像素级点击穿透** | 只有身体不透明像素能被点中，透明区域的点击直接穿透到下面的应用 |
+| 🤖 **Claude Code 状态联动** | 工作中 ⚙️ / 等你确认 ❗ / 已完成 ✅（伴随系统通知），反映**本项目**里 Claude Code 的实时状态 |
+| 📂 **拖文件起终端** | 把 Finder 的文件/文件夹拖到它身上 → 打开 Terminal、`cd` 过去并运行 `claude`；拖的是文件时还会把 `@文件名` 预填进输入框（不自动发送） |
+| 🖱️ **右键菜单** | 暂停/继续走动、退出 |
+
+### 原理简述
+
+- **状态联动**：主进程在 `127.0.0.1:4319` 起一个本地 HTTP 监听；本项目 `.claude/settings.json` 里的 hooks 用 `curl` 把 `UserPromptSubmit / Notification / Stop / SubagentStop` 事件转发过去（桌宠没开时 `curl` 秒失败、完全不影响 Claude Code）。
+- **眼睛跟随**：主进程每 ~33ms 读 `screen.getCursorScreenPoint()`，按「狗 → 鼠标」方向选注视帧并淡入。
+- **拖文件起终端**：通过 `osascript` 驱动 AppleScript 打开 Terminal 并执行命令；预填 `@文件名` 需要一次「辅助功能」授权。
+
+## 技术栈
+
+- **Electron 33**（透明 / 无边框 / 永远置顶 / 像素级点击穿透的桌面浮层窗口）
+- **原生 Canvas 2D** 绘制逐帧像素动画（翻转、呼吸缩放都画进 canvas，命中检测与所见一致）
+- **Node 内置 `http`** 实现 Claude Code hook 本地监听；**`osascript` / AppleScript** 驱动 Terminal
+- 安全模型：`contextIsolation` 开、`nodeIntegration` 关，渲染进程经 `preload.js` 白名单 IPC 与主进程通信
+- 像素素材由 Python（PIL）脚本生成 + 归一化（生成脚本与中间产物未纳入仓库，详见「目录结构」）
+
+## 如何运行
+
+需要 macOS + Node.js。
 
 ```bash
 npm install      # 安装依赖（Electron）
-npm start        # 启动桌宠
+npm start        # 启动桌宠（等价于 electron .）
 ```
 
-启动后柯基会出现在屏幕**右下角**。退出：右键狗狗 → **退出**。
+启动后柯基出现在主屏**右下角**。退出：**右键 → 退出**。
 
-## 行为
+> ⚠️ 首次用「拖文件起终端」会弹两个 macOS 权限，各点一次「允许」即可：
+> 1. **自动化**：允许 Electron 控制 Terminal（打开终端需要）。
+> 2. **辅助功能**：允许 Electron（仅用于把 `@文件名` 预填进去，不给也能打开终端、只是不预填）。
 
-| 交互 | 行为 |
-| --- | --- |
-| 😌 **安静休息（约 50%）** | 大部分时间坐着不动，有轻微**呼吸**起伏；眼睛**跟随你的鼠标**转动 |
-| 🐾 **原地小动作** | 休息一阵后，做 1–2 个**原地**小动作：挠头 / 叫 / 躺下打滚，然后继续休息。默认**不会自己在桌面乱跑**（要移动它请直接拖）。想让它到处溜达，把 `pet.js` 顶部的 `WANDER` 改成 `true` |
-| 🖱️ **拖动** | 按住身体拖到任意位置，1:1 跟手 |
-| 👆 **轻点** | 在身上点一下（不拖），狗狗「汪」一声 |
-| 🖱️➡️ **点击穿透** | 只有身体能点，透明区域穿透到下面的应用 |
-| 🖱️ **右键** | 菜单：暂停/继续走动、退出 |
+想让桌宠监听**任意项目**的 Claude Code，把 `.claude/settings.json` 里的 hooks 搬到 `~/.claude/settings.json` 即可。
 
-眼睛跟随：主进程每 ~33ms 读 `screen.getCursorScreenPoint()`，按「狗 → 鼠标」的方向（9 帧、约 40° 一档）选注视帧，切换时有 ~120ms 淡入。
-
-## 🤖 接入 Claude Code（实时任务状态）
-
-桌宠会反映**这个项目**里 Claude Code 的状态（通过本项目 `.claude/settings.json` 里的 hooks）：
-
-| 状态 | 触发（hook） | 桌宠表现 |
-| --- | --- | --- |
-| ⚙️ 工作中 | `UserPromptSubmit` | 停止乱走，专注坐着（眼睛仍跟随你），头顶 ⚙️ |
-| ❗ 等你确认 | `Notification` | 警觉坐姿，头顶 ❗ |
-| ✅ 已完成 | `Stop` | 开心「汪」一声 + 头顶 ✅ + 弹系统通知「✅ 任务完成」，随后恢复正常 |
-
-**原理**：桌宠主进程在 `127.0.0.1:4319` 起一个本地监听；hooks 用 `curl` 把事件转发过去（桌宠没开时 `curl` 秒失败、不影响 Claude Code）。
-
-**范围**：当前只监听**本项目**目录里跑的 Claude Code（在 `桌宠/.claude/settings.json`）。想全局监听（任何项目都提醒），把这些 hooks 搬到 `~/.claude/settings.json` 即可。
-
-## 📂 拖文件/文件夹给它 → 在终端启动 Claude Code
-
-把 Finder 里的**文件或文件夹拖到狗狗身上**：会打开 **Terminal**，`cd` 到该位置并运行 `claude`；如果拖的是**文件**，会把 `@文件名` 预填到输入框（**不自动发送**），你决定说什么。
-
-> ⚠️ **首次使用会弹两个 macOS 权限**（各点一次「允许」即可，之后不再问）：
-> 1. **自动化**：允许「Electron」控制「Terminal」——打开终端需要它。
-> 2. **辅助功能**：允许「Electron」——仅用于把 `@文件名` 预填进去（不给也能打开终端，只是不预填）。
->
-> 要把文件**拖到身体上**（不透明区域）才接得住；拖到四角透明处会穿透过去。
-
-## 实现要点
-
-- **素材归一化**：5 组动作（走/挠头/叫/打滚/眼睛跟随，各 9 帧）统一到 420px 画布、同一条地面基线，切换姿势不跳动、大小一致。见 `assets/`。
-- **像素级点击穿透**：默认 `setIgnoreMouseEvents(true,{forward:true})`，渲染进程对当前帧做 alpha 命中检测，只有指针压在不透明像素上才打开交互。翻转/呼吸缩放都画进 canvas（非 CSS），命中检测与所见一致。
-- **安全**：`contextIsolation` 开、`nodeIntegration` 关，渲染进程经 `preload.js` 白名单 IPC 与主进程通信。
-
-完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2 升级）。
-
-## 文件结构
+## 目录结构
 
 ```
-main.js            主进程：窗口、IPC、右键菜单、光标轮询、Claude hook 监听、拖文件起终端
-preload.js         安全 IPC 桥（window.pet.*）
+main.js                 主进程：透明窗口 / IPC / 右键菜单 / 光标轮询 / Claude hook 监听 / 拖文件起终端
+preload.js              安全 IPC 桥（暴露 window.pet.*）
 renderer/
-  index.html       一个铺满窗口的 <canvas>
-  style.css        透明、像素渲染
-  pet.js           动画引擎 + 行为状态机 + 拖动/穿透 + 眼睛跟随 + Claude 状态层 + 拖放
-assets/{walk,scratch,bark,roll,eyes}/01..09.png   归一化后的帧
+  index.html            铺满窗口的单个 <canvas>
+  style.css             透明、像素渲染
+  pet.js                动画引擎 + 行为状态机 + 拖动/穿透 + 眼睛跟随 + Claude 状态层 + 拖放
+assets/{walk,scratch,bark,roll,eyes}/01..09.png   App 实际加载的归一化帧（420 画布、同一地面基线）
 .claude/settings.json   把 Claude Code hooks 转发给桌宠
+SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
+主图.png                 展示用主图
 ```
 
-## 调参
+> 说明：`像素狗狗动作帧/`（原始动画帧 dump）、`make_mochi_pet.py` 及各 `*_run/`（像素生成实验的 PyInstaller 运行产物）体积大且与运行无关，**仅在本地留档、已通过 `.gitignore` 排除**。App 运行只依赖 `assets/` 下的归一化帧。
 
-`renderer/pet.js` 顶部：`WIN`(大小，默认 160，**与 `main.js` 的 `WIN` 保持一致**)、
-`WANDER`(默认 `false` 固定不乱跑；改 `true` 恢复溜达)、`WALK_SPEED`、
-`REST_MIN/MAX`(休息时长)、`BREATH_AMT/PERIOD`(呼吸)、`GAZE_*`(眼睛跟随)、`ACTIVITY_WEIGHTS`(动作权重)。
-`main.js` 顶部：`CLAUDE_PORT`(监听端口)、`CURSOR_POLL_MS`(光标轮询频率)。
+## 当前状态
+
+可用（v2）。已实现：固定休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、Claude Code 状态联动（含系统通知）、拖文件/文件夹起终端。默认关闭自主乱跑（`WANDER=false`）。
+
+常用调参见 `renderer/pet.js` 顶部（`WIN` / `WANDER` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
+
+---
+
+作者：一名 AI 产品经理、「驾驭工程」（让产品经理用 AI 直接把想法做成可跑的东西）的倡导者。本项目即一次 vibe coding 的产物。License: MIT。
