@@ -24,10 +24,13 @@ const DOG_X = (WIN - DOG) / 2; // dog draw origin inside the canvas
 const DOG_Y = WIN - DOG;
 const WALK_SPEED = 130; // px/s while walking
 
-// Autonomous wandering. false = the dog stays put in one spot (active bursts use
-// only in-place animations); it never walks the window across the screen on its
-// own. You can always still drag it yourself. Set true to re-enable roaming.
-const WANDER = false;
+// Autonomous wandering. true = the dog takes short strolls NEAR ITS HOME spot
+// (within HOME_RANGE) and always walks back home before resting again, so it
+// never drifts across the screen. Dragging it somewhere makes that spot the new
+// home. false = strictly in-place activities only.
+const WANDER = true;
+const HOME_RANGE = 130; // max stroll distance from home (px)
+const HOME_EPS = 8; // "close enough to home" — skip the walk back
 const ALPHA_THRESHOLD = 30; // alpha above this counts as "over the body"
 const TAP_SLOP = 4; // px of movement below which a press counts as a tap
 const RESUME_DELAY = 600; // ms to wait after a real drag before resting again
@@ -172,6 +175,7 @@ function loadAllFrames() {
 
 const state = {
   pos: { x: 0, y: 0 }, // window top-left in screen points
+  home: null, // the spot the dog lives at (returns here after strolls)
   facingRight: false, // art faces left; flip when true
   paused: false, // menu toggle
   dragging: false,
@@ -194,6 +198,10 @@ const claudeHolding = () =>
 
 // Walk target (window top-left we're moving toward), null when not walking.
 let walkTarget = null;
+
+// True while the current walk is the "going home" leg (it ends the ACTIVE
+// phase directly instead of counting as an activity).
+let returningHome = false;
 
 // Last cursor position in canvas/CSS coords; updated on every pointermove.
 let lastCursor = { x: -1, y: -1 };
@@ -640,6 +648,7 @@ function setClip(name, { loopTarget = 0 } = {}) {
 // eyes + breathing, then schedules the next ACTIVE phase. Replaces v1's goIdle.
 function enterRest() {
   walkTarget = null;
+  returningHome = false;
   setClip('eyes');
   scheduleActive();
 }
@@ -673,16 +682,32 @@ function runNextActivity() {
   }
 }
 
-// One activity finished: run the next one, or fall back to REST when the burst
-// is done.
+// One activity finished: run the next one, or wrap up the burst — walking back
+// home first if the strolls left the dog away from its spot, then REST.
 function onActivityDone() {
   if (state.paused || state.dragging || claudeHolding()) return;
+  if (returningHome) {
+    // The going-home leg just arrived: settle straight into REST.
+    returningHome = false;
+    enterRest();
+    return;
+  }
   state.activitiesLeft -= 1;
   if (state.activitiesLeft > 0) {
     runNextActivity();
+  } else if (state.home && dist(state.pos, state.home) > HOME_EPS) {
+    returnHome();
   } else {
     enterRest();
   }
+}
+
+// Walk back to the home spot (the burst's closing leg).
+function returnHome() {
+  returningHome = true;
+  state.facingRight = state.home.x > state.pos.x;
+  walkTarget = { x: state.home.x, y: state.home.y };
+  setClip('walk'); // looped; arrival at home ends it via onActivityDone
 }
 
 function startWalk() {
@@ -697,13 +722,14 @@ function startWalk() {
     const minY = wa.y;
     const maxY = wa.y + wa.height - WIN;
 
-    // Cap the burst length: ≤45% of work-area width horizontally, ≤30% of its
-    // height vertically — short hops, not screen-crossing marches. Still clamped
-    // fully on-screen.
-    const dx = rand(-0.45, 0.45) * wa.width;
-    const dy = rand(-0.3, 0.3) * wa.height;
-    const tx = clamp(state.pos.x + dx, minX, maxX);
-    const ty = clamp(state.pos.y + dy, minY, maxY);
+    // Stroll target: a random point NEAR HOME (radius ≤ HOME_RANGE around the
+    // home spot, not the current position), clamped on-screen — so consecutive
+    // walks can never drift the dog away from where it lives.
+    const home = state.home || state.pos;
+    const ang = rand(0, 2 * Math.PI);
+    const rad = rand(36, HOME_RANGE);
+    const tx = clamp(home.x + Math.cos(ang) * rad, minX, maxX);
+    const ty = clamp(home.y + Math.sin(ang) * rad, minY, maxY);
 
     state.facingRight = tx > state.pos.x;
     walkTarget = { x: tx, y: ty };
@@ -746,6 +772,7 @@ canvas.addEventListener('pointerdown', (e) => {
   clearTimeout(state.phaseTimer);
   clearTimeout(state.resumeTimer);
   walkTarget = null;
+  returningHome = false;
   currentlyInteractive = true;
   window.pet.setIgnore(false);
 
@@ -795,7 +822,9 @@ async function endDrag(e) {
     state.activitiesLeft = 1;
     setClip('bark', { loopTarget: 1 });
   } else {
-    // A real drag: settle, then resume the rest/active cycle after a short beat.
+    // A real drag: wherever you put the dog down is its new home. Settle, then
+    // resume the rest/active cycle after a short beat.
+    state.home = { x: wx, y: wy };
     setClip('eyes');
     state.resumeTimer = setTimeout(() => {
       enterRest();
@@ -857,6 +886,7 @@ window.pet.onMenuCommand((cmd) => {
       clearTimeout(state.phaseTimer);
       clearTimeout(state.resumeTimer);
       walkTarget = null;
+      returningHome = false;
       setClip('eyes');
     } else {
       enterRest();
@@ -883,6 +913,7 @@ function enterClaudeHold() {
   clearTimeout(claude.clearTimer);
   claude.clearTimer = null;
   walkTarget = null;
+  returningHome = false;
   if (!state.dragging) setClip('eyes'); // attentive REST; eyes track cursor
 }
 
@@ -897,6 +928,7 @@ function fireClaudeDone() {
   clearTimeout(state.resumeTimer);
   clearTimeout(claude.clearTimer);
   walkTarget = null;
+  returningHome = false;
   // Play one happy bark, unless the user is mid-drag (drag wins — we still flip
   // status, and endDrag won't override 'done').
   if (!state.dragging && !state.paused) {
@@ -971,9 +1003,10 @@ window.pet.onClaudeEvent(({ event, cwd, prompt }) => {
 async function start() {
   await loadAllFrames();
 
-  // Seed local position from the real window position.
+  // Seed local position from the real window position; that spot is home.
   const [wx, wy] = await window.pet.getPos();
   state.pos = { x: wx, y: wy };
+  state.home = { x: wx, y: wy };
 
   // Seed the cursor sample so the first hover test has data. The cursor is in
   // screen points; convert to canvas-local (client) coords by subtracting the
