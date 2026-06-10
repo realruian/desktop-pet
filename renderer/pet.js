@@ -40,6 +40,7 @@ const BASELINE = 388; // ground line in 420px source space (shared by all clips)
 const GAZE_FADE = 0.12; // cross-fade duration on gaze-frame change (s, ≈120ms)
 const GAZE_STEP_DEG = 40; // angular size of each gaze frame (~360/9)
 const GAZE_FRAMES = 9;
+const GAZE_Y_SIGN = -1; // vertical axis sign (see gazeFrameIndex); flip if up↔down feels wrong
 
 // Claude Code status layer (section D). When non-idle the autonomous scheduler
 // is paused and the dog holds an attentive REST (eyes still track the cursor),
@@ -193,18 +194,18 @@ function pickActivity() {
 }
 
 // Map the cursor direction (from the dog's center) to a 0-based gaze frame.
-// The 9 frames sweep CLOCKWISE in screen space (the "顺时针" set): frame 01 looks
-// East/right, then each +40° step goes clockwise (down → left → up). So we measure
-// the dog→cursor angle in SCREEN coordinates (y grows downward, i.e. NO negation):
-// straight-down = +90°, left = 180°, up = 270°. Verified end-to-end against the
-// rendered frames — negating y here is what made the gaze point the wrong way.
+// frame 01 == looking East/right; ~40° steps. `GAZE_Y_SIGN` flips the vertical
+// axis in one place: +1 = math convention (up positive), -1 = screen convention.
+// Kept as a single knob because the 9 AI-drawn frames' rotation sense is hard to
+// read; if mouse-up makes the eyes look down, flip this sign.
 function gazeFrameIndex() {
   // No cursor sample yet → look straight ahead (East == frame 0).
   if (latestCursor.x < 0) return 0;
   const centerX = state.pos.x + WIN / 2;
   const centerY = state.pos.y + WIN / 2;
   const angleDeg =
-    (Math.atan2(latestCursor.y - centerY, latestCursor.x - centerX) * 180) /
+    (Math.atan2(GAZE_Y_SIGN * (latestCursor.y - centerY), latestCursor.x - centerX) *
+      180) /
       Math.PI +
     360;
   const a = angleDeg % 360;
