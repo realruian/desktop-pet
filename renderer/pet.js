@@ -15,9 +15,14 @@
 
 // ---- Constants --------------------------------------------------------------
 
-const WIN = 160; // window + drawn-canvas size (square), matches main.js
+const WIN = 160; // window + canvas size (square), matches main.js
 const SRC = 420; // source frame size (px)
-const WALK_SPEED = 150; // px/s while walking
+// The dog is drawn smaller than the window, anchored bottom-center — the spare
+// headroom hosts the status chip, and the (transparent) window never shows.
+const DOG = 120; // drawn dog size (px)
+const DOG_X = (WIN - DOG) / 2; // dog draw origin inside the canvas
+const DOG_Y = WIN - DOG;
+const WALK_SPEED = 130; // px/s while walking
 
 // Autonomous wandering. false = the dog stays put in one spot (active bursts use
 // only in-place animations); it never walks the window across the screen on its
@@ -123,8 +128,9 @@ canvas.height = WIN * dpr;
 ctx.scale(dpr, dpr);
 ctx.imageSmoothingEnabled = false;
 
-// Baseline expressed in the WIN-space draw coordinates (anchor for breathing).
-const BASELINE_WIN = BASELINE * (WIN / SRC);
+// Baseline expressed in canvas draw coordinates (anchor for breathing), under
+// the DOG-sized, bottom-anchored placement.
+const BASELINE_WIN = DOG_Y + BASELINE * (DOG / SRC);
 
 // ---- Sprite preloading ------------------------------------------------------
 
@@ -252,8 +258,8 @@ function pickActivity() {
 // cursor. Cursor on/near the dog → 'nose' (cross-eyed) / 'forward'.
 function gazeName() {
   if (latestCursor.x < 0) return GAZE_FORWARD; // no cursor sample yet
-  const centerX = state.pos.x + WIN / 2;
-  const centerY = state.pos.y + WIN / 2;
+  const centerX = state.pos.x + WIN / 2; // dog is horizontally centered
+  const centerY = state.pos.y + DOG_Y + DOG / 2; // visual center of the dog
   const vx = latestCursor.x - centerX;
   const vy = latestCursor.y - centerY;
   const len = Math.hypot(vx, vy);
@@ -316,8 +322,8 @@ function drawClipFrame() {
     ctx.scale(-1, 1);
   }
   // Uniform anchoring: every clip shares the 420px baseline, so a straight
-  // 420→WIN scale keeps the dog grounded with no vertical "jump" between poses.
-  ctx.drawImage(img, 0, 0, SRC, SRC, 0, 0, WIN, WIN);
+  // 420→DOG scale keeps the dog grounded with no vertical "jump" between poses.
+  ctx.drawImage(img, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
   ctx.restore();
 }
 
@@ -351,11 +357,11 @@ function drawRest(now) {
   const curImg = eyes[gaze.cur];
   if (gaze.t < 1 && prevImg && prevImg.complete && prevImg.naturalWidth) {
     ctx.globalAlpha = 1;
-    ctx.drawImage(prevImg, 0, 0, SRC, SRC, 0, 0, WIN, WIN);
+    ctx.drawImage(prevImg, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
   }
   if (curImg && curImg.complete && curImg.naturalWidth) {
     ctx.globalAlpha = Math.min(gaze.t, 1);
-    ctx.drawImage(curImg, 0, 0, SRC, SRC, 0, 0, WIN, WIN);
+    ctx.drawImage(curImg, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -536,7 +542,7 @@ function drawOverlay(now) {
     ctx.font = '30px system-ui, "Apple Color Emoji", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('📂', WIN / 2, WIN / 2);
+    ctx.fillText('📂', WIN / 2, DOG_Y + DOG / 2);
     ctx.restore();
   }
 }
