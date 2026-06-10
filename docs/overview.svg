@@ -1,0 +1,90 @@
+<svg width="760" height="672" viewBox="0 0 760 672" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>多吉功能总览</title>
+  <desc>多吉是一只 macOS 像素柯基桌宠：监听全机 Claude Code 任务并在完成时提醒、支持语音和文字聊天、用 Obsidian 笔记回答问题、拖文件夹一键开终端，零打扰常驻桌面。</desc>
+  <rect x="4" y="4" width="752" height="664" rx="18" fill="#FBF8F3" stroke="#E8E0D4"/>
+
+  <rect x="28" y="22" width="94" height="80" rx="14" fill="#FFFFFF" stroke="#EADFD2"/>
+  <g transform="translate(44,32)">
+    <g fill="#E08A4E">
+      <rect x="0" y="0" width="7" height="7"/><rect x="7" y="0" width="7" height="7"/><rect x="49" y="0" width="7" height="7"/><rect x="56" y="0" width="7" height="7"/>
+      <rect x="0" y="7" width="7" height="7"/><rect x="14" y="7" width="7" height="7"/><rect x="42" y="7" width="7" height="7"/><rect x="56" y="7" width="7" height="7"/>
+      <rect x="0" y="14" width="63" height="7"/>
+      <rect x="0" y="21" width="21" height="7"/><rect x="42" y="21" width="21" height="7"/>
+      <rect x="0" y="28" width="7" height="7"/><rect x="14" y="28" width="7" height="7"/><rect x="42" y="28" width="7" height="7"/><rect x="56" y="28" width="7" height="7"/>
+      <rect x="0" y="35" width="21" height="7"/><rect x="42" y="35" width="21" height="7"/>
+      <rect x="7" y="42" width="14" height="7"/><rect x="42" y="42" width="14" height="7"/>
+    </g>
+    <g fill="#F2A9B4">
+      <rect x="7" y="7" width="7" height="7"/><rect x="49" y="7" width="7" height="7"/>
+    </g>
+    <g fill="#F3E3CB">
+      <rect x="21" y="21" width="21" height="7"/>
+      <rect x="21" y="28" width="21" height="7"/>
+      <rect x="21" y="35" width="7" height="7"/><rect x="35" y="35" width="7" height="7"/>
+      <rect x="21" y="42" width="21" height="7"/>
+      <rect x="21" y="49" width="21" height="7"/>
+    </g>
+    <g fill="#2E2218">
+      <rect x="7" y="28" width="7" height="7"/><rect x="49" y="28" width="7" height="7"/>
+      <rect x="28" y="35" width="7" height="7"/>
+    </g>
+  </g>
+  <text x="146" y="60" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="24" font-weight="600" fill="#2E2820">多吉 · 桌面 AI 柯基</text>
+  <text x="146" y="86" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13.5" fill="#8A7E6F">住在屏幕右下角的工作搭子——既是宠物，也是 Claude Code 状态台和语音助手</text>
+
+  <text x="36" y="136" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="600" fill="#B0A493">它会什么</text>
+
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <rect x="36" y="148" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="54" y="178" font-size="15" font-weight="600" fill="#3A3128">🤖 Claude 任务状态台</text>
+    <text x="54" y="200" font-size="12" fill="#837767">全机所有项目的会话都看得住，头顶</text>
+    <text x="54" y="218" font-size="12" fill="#837767">胶囊显示任务名，完成打勾＋汪一声</text>
+
+    <rect x="392" y="148" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="410" y="178" font-size="15" font-weight="600" fill="#3A3128">🎤 按住说话，松手即答</text>
+    <text x="410" y="200" font-size="12" fill="#837767">任何应用里长按 ⌥Space 开口说话，</text>
+    <text x="410" y="218" font-size="12" fill="#837767">松手自动转写发送，文字气泡回复</text>
+
+    <rect x="36" y="254" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="54" y="284" font-size="15" font-weight="600" fill="#3A3128">📓 用你的笔记回答你</text>
+    <text x="54" y="306" font-size="12" fill="#837767">提问时本地检索你的 Obsidian 库，</text>
+    <text x="54" y="324" font-size="12" fill="#837767">引用笔记原文并报标题，没翻到直说</text>
+
+    <rect x="392" y="254" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="410" y="284" font-size="15" font-weight="600" fill="#3A3128">📂 拖个文件夹，开工</text>
+    <text x="410" y="306" font-size="12" fill="#837767">文件夹拖到它身上：自动打开终端、</text>
+    <text x="410" y="324" font-size="12" fill="#837767">cd 过去、拉起 Claude Code 对话</text>
+
+    <rect x="36" y="360" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="54" y="390" font-size="15" font-weight="600" fill="#3A3128">🐾 活的，不是贴纸</text>
+    <text x="54" y="412" font-size="12" fill="#837767">呼吸起伏、眼神跟鼠标、会斗鸡眼；</text>
+    <text x="54" y="430" font-size="12" fill="#837767">散完步自己走回家，轻点汪一声</text>
+
+    <rect x="392" y="360" width="332" height="92" rx="12" fill="#FFFFFF" stroke="#EADFD2"/>
+    <text x="410" y="390" font-size="15" font-weight="600" fill="#3A3128">📌 永远在场，从不挡路</text>
+    <text x="410" y="412" font-size="12" fill="#837767">悬浮一切窗口之上，透明处点击直接</text>
+    <text x="410" y="430" font-size="12" fill="#837767">穿透；不占 Dock、开机自启</text>
+  </g>
+
+  <text x="36" y="492" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="600" fill="#B0A493">为什么要养它</text>
+
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <circle cx="42" cy="517" r="3.5" fill="#D85A30"/>
+    <text x="56" y="522" font-size="13.5" font-weight="600" fill="#3A3128">长任务不用盯终端</text>
+    <text x="56" y="542" font-size="12" fill="#837767">AI 跑几十分钟的活你去干别的，跑完那一刻它叫你</text>
+
+    <circle cx="398" cy="517" r="3.5" fill="#1D9E75"/>
+    <text x="412" y="522" font-size="13.5" font-weight="600" fill="#3A3128">一只狗看住所有项目</text>
+    <text x="412" y="542" font-size="12" fill="#837767">开几个终端都行，状态汇总在同一个狗头顶上</text>
+
+    <circle cx="42" cy="577" r="3.5" fill="#D4537E"/>
+    <text x="56" y="582" font-size="13.5" font-weight="600" fill="#3A3128">效率和情绪价值一起给</text>
+    <text x="56" y="602" font-size="12" fill="#837767">工具藏在宠物里，干活的间隙顺手摸一下</text>
+
+    <circle cx="398" cy="577" r="3.5" fill="#7F77DD"/>
+    <text x="412" y="582" font-size="13.5" font-weight="600" fill="#3A3128">数据留在本机</text>
+    <text x="412" y="602" font-size="12" fill="#837767">笔记检索全程本地，API Key 不出门</text>
+  </g>
+
+  <text x="380" y="644" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" fill="#B0A493">像素柯基 × Claude Code × Kimi × Obsidian —— 一次 vibe coding 的产物</text>
+</svg>
