@@ -25,16 +25,15 @@
 | 📓 **用你的 Obsidian 笔记回答** | 在 `config.json` 填上库路径后，每次提问它会**本地检索**你的笔记（中文双字匹配 + 标题加权），把最相关的几段作为参考来回答，并自然提到出自哪篇笔记；没翻到就老实说。纯本地文件扫描，笔记内容只随这一次提问发给模型 |
 | 🫥 **像素级点击穿透** | 只有身体不透明像素能被点中，透明区域的点击直接穿透到下面的应用 |
 | 📌 **悬浮于一切之上** | `screen-saver` 窗口层级 + 跨空间可见，普通应用、浮动面板、全屏 app 都压不住它 |
-| 🤖 **Claude Code 状态胶囊** | 头顶一枚对齐的迷你状态胶囊：**自绘小指示器**（蓝色旋转圈＝工作中 / 琥珀脉冲点＝等你确认 / 绿色对勾＝完成，伴随系统通知）+ **任务名**（你提交的 prompt 文本，放不下自动截断）+ 细进度条，三件套排成一体，反映**本项目**里 Claude Code 的实时状态 |
-| 📊 **迷你进度条** | 胶囊下沿一条 3px 细进度条：按「已用时长 + 已完成工具调用数」**渐近**估算进度（工作中最多 ~90%，不虚标），任务真正结束（Stop）时才填满变绿，随后整个胶囊淡出 |
+| 🤖 **Claude Code 状态胶囊（全机监听）** | 头顶一枚单行迷你胶囊：**自绘小指示器** + **任务名**。只显示真实知道的事——🔵 旋转圈＝在跑 / 🟡 琥珀脉冲＝等你确认 / ✅ 绿勾闪现＝完成（配一声「汪！」+ 系统通知），不再画「估算进度条」。监听**这台机器上所有项目**的 Claude Code 会话：多任务并行时显示最新任务名 + `＋N` 后缀，等确认的任务优先展示；每完成一个就闪一次 ✅，全部结束后胶囊淡出。终端直接关掉的会话静默清除，沉默 15 分钟自动遗忘 |
 | 📂 **拖文件起终端** | 把 Finder 的文件/文件夹拖到它身上 → 打开 Terminal、`cd` 过去并运行 `claude`；拖的是文件时还会把 `@文件名` 预填进输入框（不自动发送） |
 | 🖱️ **右键菜单** | 暂停/继续走动、退出 |
 
 ### 原理简述
 
-- **状态联动**：主进程在 `127.0.0.1:4319` 起一个本地 HTTP 监听；本项目 `.claude/settings.json` 里的 hooks 用 `curl` 把 `UserPromptSubmit / PostToolUse / Notification / Stop / SubagentStop` 事件转发过去（桌宠没开时 `curl` 秒失败、完全不影响 Claude Code）。
+- **状态联动**：主进程在 `127.0.0.1:4319` 起一个本地 HTTP 监听；`~/.claude/settings.json`（全局，覆盖所有项目）和本项目 `.claude/settings.json` 里的 hooks 用 `curl` 把 `UserPromptSubmit / PostToolUse / Notification / Stop / SessionEnd` 事件转发过去（桌宠没开时 `curl` 秒失败、完全不影响 Claude Code）。状态**按 session 跟踪**后合并展示；两份 hooks 并存时主进程按（事件, 会话）600ms 去重，不会重复触发。注意：hooks 在会话启动时加载，**已经开着的 Claude 会话需要重启才会被监听**。
 - **状态胶囊**：任务名取自 `UserPromptSubmit` hook 携带的 prompt 文本（缺省退化为项目目录名）；指示器（旋转圈/脉冲点/对勾）全部用 Canvas 路径**手绘**，几个像素也保持锐利，不用 emoji。
-- **迷你进度条**：Claude Code 没有真实「百分比」，所以进度条用「已用时长 + 已完成工具调用数（`PostToolUse`）」拟合一个**渐近**估计值——工作中最多涨到 ~90%，只有任务真正结束（`Stop`）才填满。好处是它一直在动、又绝不虚报完成。
+- **为什么没有进度条**：Claude Code 没有真实「百分比」，能确定的只有「还在跑 / 跑完了」。所以胶囊只声称它真正知道的事，完成那一刻用 ✅ + 一声汪明确告诉你。
 - **眼睛跟随**：主进程每 ~33ms 读 `screen.getCursorScreenPoint()`，按「狗 → 鼠标」方向选注视帧并淡入。
 - **拖文件起终端**：通过 `osascript` 驱动 AppleScript 打开 Terminal 并执行命令；预填 `@文件名` 需要一次「辅助功能」授权。
 - **Kimi 聊天**：请求在**主进程**完成（API Key 永不进渲染层）；Key/模型/接口地址放在 gitignore 掉的本地 `config.json`（模板见 `config.example.json`），每次发送时现读——填好 Key 即刻生效、无需重启。柯基人设通过 system prompt 注入。任何 OpenAI 兼容接口均可（默认 OpenRouter 路由 `moonshotai/kimi-k2.5`，也可 Moonshot 直连）。
@@ -67,7 +66,7 @@ npm start        # 启动桌宠（等价于 electron .）
 > 1. **自动化**：允许 Electron 控制 Terminal（打开终端需要）。
 > 2. **辅助功能**：允许 Electron（仅用于把 `@文件名` 预填进去，不给也能打开终端、只是不预填）。
 
-想让桌宠监听**任意项目**的 Claude Code，把 `.claude/settings.json` 里的 hooks 搬到 `~/.claude/settings.json` 即可。
+桌宠默认监听**全机所有项目**的 Claude Code（hooks 已注册到 `~/.claude/settings.json`；本项目的 `.claude/settings.json` 留有一份同样的 hooks 供克隆者开箱即用，两者并存不会重复触发）。
 
 ## 目录结构
 
@@ -91,7 +90,7 @@ SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
 
 ## 当前状态
 
-可用（v4）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（任务名 + 迷你进度条 + 系统通知）、拖文件/文件夹起终端、Kimi 聊天（双击狗身）、Obsidian 笔记问答。规划中：语音对话。
+可用（v5）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（全机多会话、任务名、完成 ✅+汪 + 系统通知）、拖文件/文件夹起终端、Kimi 聊天（双击狗身）、Obsidian 笔记问答。规划中：语音对话。
 
 常用调参见 `renderer/pet.js` 顶部（`WIN` / `DOG` / `WANDER` / `HOME_RANGE` / `STROLL_MIN` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `CHIP_*` / `PROG_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS` / `CHAT_W/H` / `PERSONA` / `VAULT_*`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
 
