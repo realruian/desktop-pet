@@ -554,6 +554,15 @@ ipcMain.handle('chat-send', async (_e, messages) => {
 // (port busy, bad payload, …) is logged once and ignored so the pet keeps
 // working without the integration.
 
+// Hooks may be registered BOTH globally (~/.claude/settings.json — every
+// project) and in this repo's .claude/settings.json (works out of the box for
+// cloners); a session in this project then POSTs each event twice, near-
+// simultaneously. Dedupe by (event, session) inside a short window — the pet's
+// handlers are idempotent, so dropping the duplicate is always safe.
+let lastHookKey = '';
+let lastHookAt = 0;
+const HOOK_DEDUPE_MS = 600;
+
 function startClaudeServer() {
   try {
     claudeServer = http.createServer((req, res) => {
@@ -566,22 +575,34 @@ function startClaudeServer() {
           let event = null;
           let cwd = null;
           let prompt = null;
+          let sessionId = null;
           try {
             const payload = JSON.parse(body || '{}');
             event = payload.hook_event_name || null;
             cwd = payload.cwd || null;
+            sessionId = payload.session_id || null;
             // UserPromptSubmit carries the user's prompt text — the pet shows a
             // truncated version of it as the task label on the status chip.
             if (typeof payload.prompt === 'string') prompt = payload.prompt;
           } catch (_) {
             /* malformed payload → just ack below, nothing to forward */
           }
-          if (event) {
-            // PostToolUse fires on every tool call (it drives the pet's mini
-            // progress bar); don't spam the log with each one.
+          const key = event + '|' + (sessionId || '');
+          const nowMs = Date.now();
+          const dupe =
+            key === lastHookKey && nowMs - lastHookAt < HOOK_DEDUPE_MS;
+          if (event && !dupe) {
+            lastHookKey = key;
+            lastHookAt = nowMs;
+            // PostToolUse fires on every tool call; don't spam the log.
             if (event !== 'PostToolUse') console.log('[claude] ' + event);
             if (win && !win.isDestroyed()) {
-              win.webContents.send('claude-event', { event, cwd, prompt });
+              win.webContents.send('claude-event', {
+                event,
+                cwd,
+                prompt,
+                sessionId,
+              });
             }
             // Native notification on task completion.
             if (event === 'Stop' && Notification.isSupported()) {

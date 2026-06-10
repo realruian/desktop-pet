@@ -72,34 +72,32 @@ const EYES_FRAMES = [
   GAZE_NOSE,
 ];
 
-// Claude Code status layer (section D). When non-idle the autonomous scheduler
-// is paused and the dog holds an attentive REST (eyes still track the cursor),
-// with a small status chip floating above its head.
-const CLAUDE_DONE_GLYPH_MS = 1500; // how long the full chip holds on completion
-const CLAUDE_DONE_CLEAR_MS = 4000; // when 'done' clears → scheduler resumes
-
-// Status chip (section D): one compact, aligned unit above the dog's head —
-// [tiny status indicator] [task label] over a slim progress bar — instead of
-// loose oversized emoji. The indicator is DRAWN (spinner / pulsing dot / check)
-// so it stays crisp at a few px. Claude Code exposes no true "percent done", so
-// the bar eases toward an HONEST effort estimate — elapsed time + completed
-// tool calls — that asymptotes to a cap BELOW 100% while still working, then
-// fills only when the task actually ends (Stop). It always moves, never lies.
+// Claude Code status layer (section D). While any session is live the
+// autonomous scheduler is paused and the dog holds an attentive REST (eyes
+// still track the cursor), with a small status chip floating above its head.
+//
+// Status chip: one compact row above the dog's head — [tiny DRAWN indicator]
+// [task label]. NO progress bar: Claude Code exposes no real percentage, so
+// the chip only claims what it actually knows — running (blue spinner),
+// needs you (amber pulse), finished (green check flash + a yip).
+//
+// Events arrive from EVERY Claude Code session on the machine (global hooks),
+// so state is tracked PER SESSION and the chip shows the merged picture:
+// any session waiting beats working; multiple running shows a ＋N suffix;
+// each completion flashes ✅ with that task's label (and a bark), then the
+// chip returns to the remaining tasks or fades away.
 const CHIP_W = 92; // chip width (WIN-space px), centered above the head
-const CHIP_H = 21; // chip height; the resting dog's crown is at y≈21
+const CHIP_H = 16; // chip height (single row); the dog's crown is at y≈21
 const CHIP_Y = 0; // chip top
 const CHIP_PAD = 7; // left/right inner padding
 const CHIP_LABEL_FONT = '9px -apple-system, "PingFang SC", system-ui, sans-serif';
-const PROG_BAR_H = 3; // slim progress bar height (chip row 2)
-const PROG_WORK_CAP = 0.9; // never fill past this while still working
-const PROG_TIME_TAU = 28; // s — elapsed-time contribution constant
-const PROG_TOOL_TAU = 7; // completed tool calls contribution constant
-const PROG_EASE = 6; // per-second lerp rate of displayed → target
-const PROG_FADE_MS = 450; // chip fade-out after the done hold
-const PROG_COLOR = {
-  working: '#7aa2ff', // calm blue — in progress
+const CHIP_FADE_MS = 450; // chip fade-out once everything is done
+const DONE_FLASH_MS = 2200; // how long each task's ✅ flash holds
+const SESSION_STALE_MS = 15 * 60 * 1000; // forget sessions silent this long
+const CHIP_COLOR = {
+  working: '#7aa2ff', // calm blue — running
   waiting: '#ffcc66', // amber — needs you
-  done: '#5fd07a', // green — complete
+  done: '#5fd07a', // green — finished
 };
 
 // Animation clips: frame count + playback fps. Art faces LEFT by default.
@@ -194,10 +192,9 @@ const state = {
 // Convenience: REST is the canonical idle, identified by the 'eyes' clip.
 const isResting = () => state.clipName === 'eyes';
 
-// True while a Claude status is holding the dog (scheduler paused). 'done' is a
-// transient one-shot, so it does NOT count as a hold — only working/waiting do.
-const claudeHolding = () =>
-  claude.status === 'working' || claude.status === 'waiting';
+// True while any live Claude session holds the dog (scheduler paused). The
+// done-flash is transient and does NOT count as a hold.
+const claudeHolding = () => claude.sessions.size > 0;
 
 // Walk target (window top-left we're moving toward), null when not walking.
 let walkTarget = null;
@@ -219,19 +216,17 @@ let latestCursor = { x: -1, y: -1 };
 // from the previous named frame to the new one over GAZE_FADE seconds.
 const gaze = { prev: GAZE_FORWARD, cur: GAZE_FORWARD, t: 1 }; // t in [0,1]; 1 == fully on `cur`
 
-// Claude Code status (section D). 'idle' === the v2 autonomous scheduler is in
-// charge; 'working'/'waiting' hold an attentive REST; 'done' is a one-shot
-// (bark + ✅) that takes precedence, then clears back to the scheduler.
+// Claude Code status (section D), tracked per session (global hooks mean any
+// number of Claude Code tasks can be live at once across projects).
 const claude = {
-  status: 'idle', // 'idle' | 'working' | 'waiting' | 'done'
-  glyphUntil: 0, // performance.now() ms until which the glyph is drawn
-  clearTimer: null, // setTimeout id that returns 'done' → idle
-  // Status chip bookkeeping (see CHIP_*/PROG_* constants):
-  progress: 0, // displayed fill [0,1], eased toward `target`
-  target: 0, // current effort-estimate target [0,1]
-  workStart: 0, // performance.now() when the current task began
-  toolCount: 0, // completed tool calls in the current task
-  taskLabel: '', // what the task IS — the prompt text (or project name)
+  sessions: new Map(), // session id -> { status:'working'|'waiting', label, last }
+  display: 'idle', // derived: 'idle' | 'working' | 'waiting'
+  taskLabel: '', // merged label shown while working/waiting
+  taskExtra: 0, // how many MORE tasks are live beyond the labeled one (＋N)
+  doneUntil: 0, // performance.now() end of the current ✅ flash
+  doneLabel: '', // label shown during the flash
+  holding: false, // scheduler-hold transition tracking
+  resumeTimer: null, // setTimeout id resuming the scheduler after the last task
 };
 
 // True while a file/folder is being dragged over the dog (section E): show a
@@ -405,23 +400,6 @@ function drawFrame(now, dt) {
   if (scaled) ctx.restore();
 }
 
-// Advance the mini progress bar. While 'working' the target eases toward an
-// asymptotic effort estimate (elapsed time + tool calls), capped below 100%; on
-// 'waiting' it freezes (we're blocked on the user); on 'done' it completes. The
-// displayed value always lerps toward the target so the bar glides smoothly.
-function updateClaudeProgress(now, dt) {
-  if (claude.status === 'working') {
-    const elapsed = (now - claude.workStart) / 1000;
-    const effort = elapsed / PROG_TIME_TAU + claude.toolCount / PROG_TOOL_TAU;
-    claude.target = PROG_WORK_CAP * (1 - Math.exp(-effort));
-  } else if (claude.status === 'done') {
-    claude.target = 1;
-  }
-  // 'waiting' leaves target untouched (frozen); 'idle' isn't drawn.
-  const k = Math.min(1, dt * PROG_EASE);
-  claude.progress += (claude.target - claude.progress) * k;
-}
-
 // Truncate `text` to fit `maxW` px in the current ctx font, with an ellipsis.
 function ellipsize(text, maxW) {
   if (ctx.measureText(text).width <= maxW) return text;
@@ -431,13 +409,13 @@ function ellipsize(text, maxW) {
   return text + '…';
 }
 
-// The status chip: one compact panel above the dog's head where everything
-// lines up — (row 1) a small DRAWN indicator (spinner / pulsing dot / check,
-// crisp at a few px, no emoji) + the task label, (row 2) the slim progress bar.
-function drawStatusChip(now, alpha) {
+// The status chip: one compact row above the dog's head — a small DRAWN
+// indicator (spinner / pulsing dot / check, crisp at a few px, no emoji)
+// followed by the task label and an optional ＋N more-tasks suffix.
+function drawStatusChip(now, alpha, mode, label, suffix) {
   const x = (WIN - CHIP_W) / 2;
   const y = CHIP_Y;
-  const color = PROG_COLOR[claude.status] || PROG_COLOR.working;
+  const color = CHIP_COLOR[mode] || CHIP_COLOR.working;
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -451,11 +429,11 @@ function drawStatusChip(now, alpha) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Row 1 — status indicator.
+  // Status indicator.
   const ix = x + CHIP_PAD + 3.5; // indicator center
-  const iy = y + 7.5;
-  if (claude.status === 'working') {
-    // Tiny spinner: a 270° arc revolving ~0.8 rev/s.
+  const iy = y + CHIP_H / 2;
+  if (mode === 'working') {
+    // Tiny spinner: a 270° arc revolving ~0.8 rev/s — "still running".
     const a0 = (now / 1250) * 2 * Math.PI;
     ctx.beginPath();
     ctx.arc(ix, iy, 3, a0, a0 + Math.PI * 1.5);
@@ -463,7 +441,7 @@ function drawStatusChip(now, alpha) {
     ctx.lineWidth = 1.4;
     ctx.lineCap = 'round';
     ctx.stroke();
-  } else if (claude.status === 'waiting') {
+  } else if (mode === 'waiting') {
     // Amber dot, gently pulsing — needs your attention.
     const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(now / 280));
     ctx.beginPath();
@@ -489,43 +467,20 @@ function drawStatusChip(now, alpha) {
     ctx.stroke();
   }
 
-  // Row 1 — task label: what this progress IS the progress of.
+  // Task label: WHICH task this status belongs to. The ＋N "more tasks" suffix
+  // is drawn separately AFTER ellipsizing, so a long label can never swallow it.
   ctx.font = CHIP_LABEL_FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   const tx = ix + 7;
-  const label = claude.taskLabel || 'Claude 任务';
-  ctx.fillText(ellipsize(label, x + CHIP_W - CHIP_PAD - tx), tx, iy);
-
-  // Row 2 — slim progress bar spanning the chip, aligned under the label.
-  const bx = x + CHIP_PAD;
-  const bw = CHIP_W - CHIP_PAD * 2;
-  const by = y + CHIP_H - PROG_BAR_H - 4;
-  const r = PROG_BAR_H / 2;
-  ctx.beginPath();
-  ctx.roundRect(bx, by, bw, PROG_BAR_H, r);
-  ctx.fillStyle = 'rgba(255,255,255,0.16)';
-  ctx.fill();
-  const p = clamp(claude.progress, 0, 1);
-  const fillW = p > 0 ? Math.max(PROG_BAR_H, bw * p) : 0;
-  if (fillW > 0) {
-    ctx.beginPath();
-    ctx.roundRect(bx, by, fillW, PROG_BAR_H, r);
-    ctx.fillStyle = color;
-    ctx.fill();
-    if (claude.status === 'working') {
-      // Subtle sweeping sheen so progress feels alive even near the cap.
-      const sx = bx + ((now / 1100) % 1) * fillW;
-      const g = ctx.createLinearGradient(sx - 7, 0, sx + 7, 0);
-      g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(0.5, 'rgba(255,255,255,0.45)');
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.beginPath();
-      ctx.roundRect(bx, by, fillW, PROG_BAR_H, r);
-      ctx.fillStyle = g;
-      ctx.fill();
-    }
+  const maxW = x + CHIP_W - CHIP_PAD - tx;
+  const sufW = suffix ? ctx.measureText(suffix).width + 2 : 0;
+  const text = ellipsize(label || 'Claude 任务', maxW - sufW);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(text, tx, iy);
+  if (suffix) {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(suffix, tx + ctx.measureText(text).width + 2, iy);
   }
 
   ctx.restore();
@@ -535,17 +490,29 @@ function drawStatusChip(now, alpha) {
 // hit-test has already sampled the (chip-free) dog. Keeping the overlay out of
 // the hit-test means it never becomes draggable nor disturbs click-through.
 function drawOverlay(now) {
-  // Chip visibility: working/waiting persist; done holds at full until
-  // glyphUntil, then fades out over PROG_FADE_MS; idle → nothing.
+  // Chip visibility: a fresh completion flashes ✅ (+ its task label) for
+  // DONE_FLASH_MS and takes precedence; otherwise working/waiting persist;
+  // after the last task the flash fades the chip away; idle → nothing.
   let chipAlpha = 0;
-  if (claude.status === 'working' || claude.status === 'waiting') {
+  let mode = null;
+  let label = '';
+  let suffix = '';
+  if (now < claude.doneUntil) {
+    mode = 'done';
+    label = claude.doneLabel;
     chipAlpha = 1;
-  } else if (claude.status === 'done') {
-    if (now < claude.glyphUntil) chipAlpha = 1;
-    else if (now < claude.glyphUntil + PROG_FADE_MS)
-      chipAlpha = 1 - (now - claude.glyphUntil) / PROG_FADE_MS;
+  } else if (claude.display === 'working' || claude.display === 'waiting') {
+    mode = claude.display;
+    label = claude.taskLabel;
+    if (claude.taskExtra > 0) suffix = '＋' + claude.taskExtra;
+    chipAlpha = 1;
+  } else if (now < claude.doneUntil + CHIP_FADE_MS) {
+    mode = 'done';
+    label = claude.doneLabel;
+    chipAlpha = 1 - (now - claude.doneUntil) / CHIP_FADE_MS;
   }
-  if (chipAlpha > 0.01) drawStatusChip(now, chipAlpha);
+  if (chipAlpha > 0.01 && mode)
+    drawStatusChip(now, chipAlpha, mode, label, suffix);
 
   // Drop-hover cue: a 📂 centered over the dog inviting the drop (section E).
   if (dropHover) {
@@ -582,9 +549,7 @@ function loop(now) {
   // 4) Draw, then re-test click-through against the (possibly moved) sprite.
   drawFrame(now, dt);
   updateInteractivity();
-  // 5) Advance the progress bar, then draw the glyph + bar overlay last so they
-  //    never participate in the hit-test above.
-  updateClaudeProgress(now, dt);
+  // 5) Chip overlay last, so it never participates in the hit-test above.
   drawOverlay(now);
 
   requestAnimationFrame(loop);
@@ -658,10 +623,9 @@ function enterRest() {
 
 function scheduleActive() {
   clearTimeout(state.phaseTimer);
-  // Don't arm the scheduler while any Claude status owns the dog. working/
-  // waiting hold indefinitely; 'done' holds until its clear timer calls
-  // enterRest, so the post-bark REST shouldn't re-arm early.
-  if (state.paused || state.dragging || claude.status !== 'idle') return;
+  // Don't arm the scheduler while live Claude sessions own the dog (the
+  // resume after the last task is driven by refreshClaude's resume timer).
+  if (state.paused || state.dragging || claudeHolding()) return;
   const delay = rand(REST_MIN, REST_MAX);
   state.phaseTimer = setTimeout(enterActive, delay);
 }
@@ -688,7 +652,13 @@ function runNextActivity() {
 // One activity finished: run the next one, or wrap up the burst — walking back
 // home first if the strolls left the dog away from its spot, then REST.
 function onActivityDone() {
-  if (state.paused || state.dragging || claudeHolding()) return;
+  if (state.paused || state.dragging) return;
+  if (claudeHolding()) {
+    // A one-off (e.g. the completion yip) finished during a hold: settle back
+    // into the attentive REST instead of looping the clip.
+    setClip('eyes');
+    return;
+  }
   if (returningHome) {
     // The going-home leg just arrived: settle straight into REST.
     returningHome = false;
@@ -810,15 +780,10 @@ async function endDrag(e) {
     return;
   }
 
-  // A Claude status was held off while the user dragged (drag always wins).
-  // Re-project it now instead of resuming the autonomous scheduler.
+  // Live Claude sessions were held off while the user dragged (drag always
+  // wins). Re-project the attentive hold now instead of resuming the scheduler.
   if (claudeHolding()) {
     setClip('eyes'); // attentive REST; scheduler stays paused
-    return;
-  }
-  if (claude.status === 'done') {
-    // The 'done' one-shot's clear timer already owns the resume; just settle.
-    setClip('eyes');
     return;
   }
 
@@ -913,60 +878,86 @@ window.pet.onCursor((p) => {
 
 // ---- Claude Code status layer (section D) -----------------------------------
 //
-// Maps forwarded hook events to the dog's reaction. A live drag always wins, so
-// holds never fight the user; we record the requested status but only project
-// it onto the clip once the drag ends (endDrag re-applies it).
+// Maps forwarded hook events (from EVERY Claude Code session on the machine —
+// hooks live in ~/.claude/settings.json) onto per-session state, then derives
+// what the chip shows and whether the scheduler is held. A live drag always
+// wins, so holds never fight the user.
 
-// Enter an attentive REST hold (working/waiting): pause the scheduler and sit
-// with the gaze-tracked eyes. No-op visually if a drag is in progress.
+// Enter an attentive REST hold: pause the scheduler and sit with the
+// gaze-tracked eyes. No-op visually if a drag is in progress.
 function enterClaudeHold() {
   clearTimeout(state.phaseTimer);
   clearTimeout(state.resumeTimer);
-  clearTimeout(claude.clearTimer);
-  claude.clearTimer = null;
+  clearTimeout(claude.resumeTimer);
+  claude.resumeTimer = null;
   walkTarget = null;
   returningHome = false;
   if (!state.dragging) setClip('eyes'); // attentive REST; eyes track cursor
 }
 
-// Fire the 'done' one-shot: a happy yip + ✅ glyph, then (after CLEAR_MS) clear
-// the status and hand control back to the scheduler. Takes precedence over any
-// working/waiting hold.
-function fireClaudeDone() {
-  claude.status = 'done';
-  claude.target = 1; // drive the mini progress bar to full
-  claude.glyphUntil = performance.now() + CLAUDE_DONE_GLYPH_MS;
-  clearTimeout(state.phaseTimer);
-  clearTimeout(state.resumeTimer);
-  clearTimeout(claude.clearTimer);
-  walkTarget = null;
-  returningHome = false;
-  // Play one happy bark, unless the user is mid-drag (drag wins — we still flip
-  // status, and endDrag won't override 'done').
+// A task finished: flash ✅ with its label and yip once. The chip/scheduler
+// afterlife is handled by refreshClaude (other sessions may still be running).
+function fireClaudeDone(label) {
+  claude.doneLabel = label || '任务完成';
+  claude.doneUntil = performance.now() + DONE_FLASH_MS;
   if (!state.dragging && !state.paused) {
-    state.activitiesLeft = 1; // a single celebratory yip, then back to REST
+    state.activitiesLeft = 1; // a single celebratory yip
     setClip('bark', { loopTarget: 1 });
   }
-  claude.clearTimer = setTimeout(() => {
-    claude.status = 'idle';
+}
+
+// Recompute the merged display from live sessions and manage the scheduler
+// hold/resume transitions. Called after every event and periodically (stale
+// sessions from killed terminals are forgotten).
+function refreshClaude() {
+  const wall = Date.now();
+  for (const [sid, s] of claude.sessions) {
+    if (wall - s.last > SESSION_STALE_MS) claude.sessions.delete(sid);
+  }
+  const all = [...claude.sessions.values()];
+  const waiting = all.filter((s) => s.status === 'waiting');
+  const working = all.filter((s) => s.status === 'working');
+  if (waiting.length) {
+    // Anything waiting for the user beats everything else.
+    claude.display = 'waiting';
+    claude.taskLabel = waiting[waiting.length - 1].label;
+    claude.taskExtra = all.length - 1;
+  } else if (working.length) {
+    working.sort((a, b) => a.last - b.last);
+    claude.display = 'working';
+    claude.taskLabel = working[working.length - 1].label;
+    claude.taskExtra = working.length - 1;
+  } else {
+    claude.display = 'idle';
     claude.taskLabel = '';
-    claude.clearTimer = null;
-    // Resume the autonomous scheduler from REST (unless paused/dragging).
-    if (!state.paused && !state.dragging) enterRest();
-  }, CLAUDE_DONE_CLEAR_MS);
+    claude.taskExtra = 0;
+  }
+
+  // Hold while sessions are live; resume once the last one is gone (after its
+  // ✅ flash has played out).
+  if (claudeHolding()) {
+    if (!claude.holding) {
+      claude.holding = true;
+      enterClaudeHold();
+    }
+  } else if (claude.holding) {
+    claude.holding = false;
+    const wait =
+      Math.max(0, claude.doneUntil - performance.now()) + CHIP_FADE_MS;
+    clearTimeout(claude.resumeTimer);
+    claude.resumeTimer = setTimeout(() => {
+      claude.resumeTimer = null;
+      if (!state.paused && !state.dragging && !claudeHolding()) enterRest();
+    }, wait);
+  }
 }
 
-// Restart the mini progress bar from empty for a fresh task.
-function resetClaudeProgress() {
-  claude.progress = 0;
-  claude.target = 0;
-  claude.toolCount = 0;
-  claude.workStart = performance.now();
-}
+// Forget stale sessions even when no events arrive (e.g. a killed terminal).
+setInterval(refreshClaude, 60 * 1000);
 
-// Derive the chip's task label: the prompt text (whitespace collapsed) or, when
-// that's unavailable (pet launched mid-task / Notification-only), the project
-// folder's name from cwd.
+// Derive a session's task label: the prompt text (whitespace collapsed) or,
+// when that's unavailable (pet launched mid-task / Notification-only), the
+// project folder's name from cwd.
 function taskLabelFrom(prompt, cwd) {
   const p = (prompt || '').replace(/\s+/g, ' ').trim();
   if (p) return p.slice(0, 60); // ellipsized to chip width at draw time
@@ -974,40 +965,62 @@ function taskLabelFrom(prompt, cwd) {
   return parts.length ? parts[parts.length - 1] : '';
 }
 
-window.pet.onClaudeEvent(({ event, cwd, prompt }) => {
+window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
+  const sid = sessionId || cwd || 'default';
+  const wall = Date.now();
+  const s = claude.sessions.get(sid);
   switch (event) {
     case 'UserPromptSubmit':
-      claude.status = 'working';
-      claude.taskLabel = taskLabelFrom(prompt, cwd); // the chip names the task
-      resetClaudeProgress(); // fresh task → bar starts at 0
-      enterClaudeHold();
+      // A turn began (new or existing session) → that session is running.
+      claude.sessions.set(sid, {
+        status: 'working',
+        label: taskLabelFrom(prompt, cwd),
+        last: wall,
+      });
       break;
     case 'PostToolUse':
-      // Each completed tool call nudges the effort estimate forward. If we never
-      // saw the task start (pet launched mid-task), begin a fresh working bar.
-      if (claude.status !== 'working' && claude.status !== 'waiting') {
-        claude.status = 'working';
-        claude.taskLabel = taskLabelFrom(null, cwd);
-        resetClaudeProgress();
-        enterClaudeHold();
-      } else if (claude.status === 'waiting') {
-        claude.status = 'working'; // a tool ran after approval → back to work
+      // Tool activity proves the session is running (also flips a 'waiting'
+      // session back after the user approved, and adopts sessions the pet
+      // never saw start).
+      if (s) {
+        s.status = 'working';
+        s.last = wall;
+      } else {
+        claude.sessions.set(sid, {
+          status: 'working',
+          label: taskLabelFrom(null, cwd),
+          last: wall,
+        });
       }
-      claude.toolCount += 1;
       break;
     case 'Notification':
-      claude.status = 'waiting';
-      if (!claude.taskLabel) claude.taskLabel = taskLabelFrom(null, cwd);
-      enterClaudeHold();
+      // Claude is blocked on the user (permission / question).
+      if (s) {
+        s.status = 'waiting';
+        s.last = wall;
+      } else {
+        claude.sessions.set(sid, {
+          status: 'waiting',
+          label: taskLabelFrom(null, cwd),
+          last: wall,
+        });
+      }
       break;
     case 'Stop':
-      fireClaudeDone();
+      // The turn finished → that task succeeded: ✅ flash + yip.
+      claude.sessions.delete(sid);
+      fireClaudeDone(s ? s.label : taskLabelFrom(prompt, cwd));
+      break;
+    case 'SessionEnd':
+      // Terminal/session closed — clear silently (no celebration).
+      claude.sessions.delete(sid);
       break;
     case 'SubagentStop':
     default:
       // Ignore SubagentStop (and anything unrecognized) to avoid noise.
       break;
   }
+  refreshClaude();
 });
 
 // ---- Boot -------------------------------------------------------------------

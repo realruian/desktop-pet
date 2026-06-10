@@ -40,7 +40,7 @@
         ]
       }
     ],
-    "SubagentStop": [
+    "SessionEnd": [
       {
         "hooks": [
           {
