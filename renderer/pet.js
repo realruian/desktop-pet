@@ -36,11 +36,30 @@ const BREATH_AMT = 0.02; // ±2% vertical scale
 const BREATH_PERIOD = 3200; // ms per breath cycle
 const BASELINE = 388; // ground line in 420px source space (shared by all clips)
 
-// Eyes / gaze (REST): 9 front-facing frames, body identical, only pupils move.
-const GAZE_FADE = 0.12; // cross-fade duration on gaze-frame change (s, ≈120ms)
-const GAZE_STEP_DEG = 40; // angular size of each gaze frame (~360/9)
-const GAZE_FRAMES = 9;
-const GAZE_Y_SIGN = -1; // vertical axis sign (see gazeFrameIndex); flip if up↔down feels wrong
+// Eyes / gaze (REST): frames are NAMED by the direction the dog actually looks
+// (from the source art), so we just match the cursor vector to the closest named
+// direction — no angle-sign guesswork. Vectors are in SCREEN coords (x right, y
+// DOWN). 'forward' (正视) when the cursor is near; 'nose' (看鼻子, cross-eyed)
+// when it's right on the dog's face. Down-right has no art frame → nearest wins.
+const GAZE_FADE = 0.12; // cross-fade duration on gaze change (s, ≈120ms)
+const GAZE_DIRS = [
+  { name: 'right', dx: 1, dy: 0 },
+  { name: 'upright', dx: 1, dy: -1 },
+  { name: 'up', dx: 0, dy: -1 },
+  { name: 'upleft', dx: -1, dy: -1 },
+  { name: 'left', dx: -1, dy: 0 },
+  { name: 'downleft', dx: -1, dy: 1 },
+  { name: 'down', dx: 0, dy: 1 },
+];
+const GAZE_FORWARD = 'forward';
+const GAZE_NOSE = 'nose';
+const GAZE_NEAR_PX = 75; // cursor within this of the dog's center → look 'forward'
+const GAZE_NOSE_PX = 30; // cursor this close (on the face) → cross-eyed 'nose'
+const EYES_FRAMES = [
+  ...GAZE_DIRS.map((g) => g.name),
+  GAZE_FORWARD,
+  GAZE_NOSE,
+];
 
 // Claude Code status layer (section D). When non-idle the autonomous scheduler
 // is paused and the dog holds an attentive REST (eyes still track the cursor),
@@ -54,13 +73,12 @@ const CLAUDE_DONE_GLYPH_MS = 1500; // how long the ✅ shows on completion
 const CLAUDE_DONE_CLEAR_MS = 4000; // when 'done' clears → scheduler resumes
 
 // Animation clips: frame count + playback fps. Art faces LEFT by default.
-// `eyes` is the REST clip — front-facing; its frame is chosen by gaze, not fps.
+// (REST uses the separately-loaded, gaze-named `images.eyes` set — see below.)
 const CLIPS = {
   walk: { fps: 10, frames: 9, faces: 'left' }, // side profile
   scratch: { fps: 8, frames: 9, faces: 'front' },
   bark: { fps: 9, frames: 9, faces: 'front' },
   roll: { fps: 8, frames: 9, faces: 'front' },
-  eyes: { fps: 1, frames: 9, faces: 'front' }, // REST; gaze-driven, see drawRest
 };
 
 // Weighted activity picks for an ACTIVE-phase burst. `walk` (the only activity
@@ -94,23 +112,33 @@ const BASELINE_WIN = BASELINE * (WIN / SRC);
 // images[clip] = Image[] (index 0..frames-1)
 const images = {};
 
+function loadOne(src, tasks) {
+  const img = new Image();
+  img.src = src;
+  tasks.push(
+    new Promise((resolve) => {
+      // Resolve on both load and error so one bad file can't hang startup.
+      img.onload = resolve;
+      img.onerror = resolve;
+    })
+  );
+  return img;
+}
+
 function loadAllFrames() {
   const tasks = [];
+  // Numbered animation clips.
   for (const clip of Object.keys(CLIPS)) {
     images[clip] = [];
     for (let i = 1; i <= CLIPS[clip].frames; i++) {
-      const img = new Image();
       const name = String(i).padStart(2, '0') + '.png';
-      img.src = `../assets/${clip}/${name}`;
-      images[clip][i - 1] = img;
-      tasks.push(
-        new Promise((resolve) => {
-          // Resolve on both load and error so one bad file can't hang startup.
-          img.onload = resolve;
-          img.onerror = resolve;
-        })
-      );
+      images[clip][i - 1] = loadOne(`../assets/${clip}/${name}`, tasks);
     }
+  }
+  // REST gaze frames, keyed by direction name (images.eyes[name]).
+  images.eyes = {};
+  for (const name of EYES_FRAMES) {
+    images.eyes[name] = loadOne(`../assets/eyes/${name}.png`, tasks);
   }
   return Promise.all(tasks);
 }
@@ -151,9 +179,9 @@ let lastCursor = { x: -1, y: -1 };
 // first real sample; -1 means "no sample yet" → look straight ahead (East).
 let latestCursor = { x: -1, y: -1 };
 
-// Gaze cross-fade bookkeeping: when the computed frame changes we fade from the
-// previous pupil position to the new one over GAZE_FADE seconds.
-const gaze = { prev: 0, cur: 0, t: 1 }; // t in [0,1]; 1 == fully on `cur`
+// Gaze cross-fade bookkeeping: when the chosen gaze direction changes we fade
+// from the previous named frame to the new one over GAZE_FADE seconds.
+const gaze = { prev: GAZE_FORWARD, cur: GAZE_FORWARD, t: 1 }; // t in [0,1]; 1 == fully on `cur`
 
 // Claude Code status (section D). 'idle' === the v2 autonomous scheduler is in
 // charge; 'working'/'waiting' hold an attentive REST; 'done' is a one-shot
@@ -193,23 +221,30 @@ function pickActivity() {
   return 'scratch';
 }
 
-// Map the cursor direction (from the dog's center) to a 0-based gaze frame.
-// frame 01 == looking East/right; ~40° steps. `GAZE_Y_SIGN` flips the vertical
-// axis in one place: +1 = math convention (up positive), -1 = screen convention.
-// Kept as a single knob because the 9 AI-drawn frames' rotation sense is hard to
-// read; if mouse-up makes the eyes look down, flip this sign.
-function gazeFrameIndex() {
-  // No cursor sample yet → look straight ahead (East == frame 0).
-  if (latestCursor.x < 0) return 0;
+// Choose the gaze frame NAME by matching the dog→cursor vector to the closest
+// named direction. Vectors are in screen coords (x right, y DOWN), so there is no
+// angle-sign ambiguity: we just pick the art frame that looks most toward the
+// cursor. Cursor on/near the dog → 'nose' (cross-eyed) / 'forward'.
+function gazeName() {
+  if (latestCursor.x < 0) return GAZE_FORWARD; // no cursor sample yet
   const centerX = state.pos.x + WIN / 2;
   const centerY = state.pos.y + WIN / 2;
-  const angleDeg =
-    (Math.atan2(GAZE_Y_SIGN * (latestCursor.y - centerY), latestCursor.x - centerX) *
-      180) /
-      Math.PI +
-    360;
-  const a = angleDeg % 360;
-  return ((Math.round(a / GAZE_STEP_DEG) % GAZE_FRAMES) + GAZE_FRAMES) % GAZE_FRAMES;
+  const vx = latestCursor.x - centerX;
+  const vy = latestCursor.y - centerY;
+  const len = Math.hypot(vx, vy);
+  if (len < GAZE_NOSE_PX) return GAZE_NOSE; // cursor right on the face → cross-eyed
+  if (len < GAZE_NEAR_PX) return GAZE_FORWARD; // cursor near → look straight at you
+  let best = GAZE_DIRS[0];
+  let bestDot = -Infinity;
+  for (const g of GAZE_DIRS) {
+    // cosine similarity between the cursor vector and this frame's direction
+    const dot = (vx * g.dx + vy * g.dy) / (len * Math.hypot(g.dx, g.dy));
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = g;
+    }
+  }
+  return best.name;
 }
 
 // ---- Pixel-perfect hit test -------------------------------------------------
@@ -261,15 +296,14 @@ function drawClipFrame() {
   ctx.restore();
 }
 
-// Draw the REST pose: gaze-selected eyes frame, with a soft cross-fade when the
-// gaze frame changes, all under the breathing scale. Bodies are pixel-identical
-// across eyes frames, so only the pupils visibly fade.
+// Draw the REST pose: the gaze-selected (direction-named) eyes frame, with a soft
+// cross-fade when the gaze direction changes, all under the breathing scale.
 function drawRest(now) {
   const eyes = images.eyes;
-  if (!eyes || eyes.length === 0) return;
+  if (!eyes) return;
 
-  // Pick the target gaze frame and start a fade if it changed.
-  const want = gazeFrameIndex();
+  // Pick the target gaze frame (by name) and start a fade if it changed.
+  const want = gazeName();
   if (want !== gaze.cur) {
     gaze.prev = gaze.cur;
     gaze.cur = want;
