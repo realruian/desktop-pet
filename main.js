@@ -3,7 +3,15 @@
 // brokers all privileged operations (window move/position, cursor, work area,
 // context menu) to the sandboxed renderer over IPC.
 
-const { app, BrowserWindow, ipcMain, screen, Menu, Notification } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  screen,
+  Menu,
+  Notification,
+  systemPreferences,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -25,12 +33,21 @@ const CHAT_H = 400;
 // The dog's persona for Kimi conversations (section F). Prepended as the
 // system message on every request.
 const PERSONA =
-  '你是住在 macOS 桌面右下角的像素柯基桌宠。性格活泼、粘人、有点小机灵。' +
+  '你是住在 macOS 桌面右下角的像素柯基桌宠，名字叫「多吉」——主人给你起的，' +
+  '你也这样自称。性格活泼、粘人、有点小机灵。' +
   '用中文口语回复，简短（一般不超过三句），偶尔带一声「汪！」或可爱的语气词。' +
-  '你会的本领：被主人拖来拖去、眼睛跟着鼠标转、显示 Claude Code 任务进度、' +
-  '接住拖给你的文件帮主人打开终端、翻主人的 Obsidian 笔记帮忙回忆和回答。' +
+  '你会的本领：听主人说话（语音）、被主人拖来拖去、眼睛跟着鼠标转、' +
+  '显示 Claude Code 任务进度、接住拖给你的文件帮主人打开终端、' +
+  '翻主人的 Obsidian 笔记帮忙回忆和回答。' +
   '如果消息里附了「主人的笔记片段」，优先依据它回答并自然提到出自哪篇笔记；' +
   '笔记里没有的就老实说没翻到。不要用 Markdown 标题或长列表，自然聊天即可。';
+
+// Transcription instruction for the STT model (an audio-input chat model on
+// the same OpenAI-compatible endpoint — no extra account needed).
+const STT_PROMPT =
+  '请把这段语音逐字转写成简体中文文字。只输出转写结果本身，' +
+  '不要任何解释、引号或前后缀；语音里夹杂的英文按原样保留。' +
+  '热词提示：说话人养的桌面宠物狗叫「多吉」，听到相近发音时优先写作「多吉」。';
 
 /** @type {BrowserWindow|null} */
 let win = null;
@@ -150,7 +167,7 @@ ipcMain.on('show-menu', () => {
   if (!win) return;
   const menu = Menu.buildFromTemplate([
     {
-      label: '💬 聊天',
+      label: '💬 和多吉聊天',
       click: () => openChat(),
     },
     {
@@ -250,11 +267,13 @@ ipcMain.on('open-in-claude', (_e, p) => {
 function loadKimiConfig() {
   let cfg = {};
   let obsidian = {};
+  let stt = {};
   try {
     const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
     const parsed = JSON.parse(raw) || {};
     cfg = parsed.kimi || {};
     obsidian = parsed.obsidian || {};
+    stt = parsed.stt || {};
   } catch (_) {
     /* missing/malformed config.json → fall back to env/defaults */
   }
@@ -266,6 +285,8 @@ function loadKimiConfig() {
       'https://api.moonshot.cn/v1',
     model: process.env.PET_KIMI_MODEL || cfg.model || 'kimi-latest',
     vault: process.env.PET_OBSIDIAN_VAULT || obsidian.vault || '',
+    sttModel:
+      process.env.PET_STT_MODEL || stt.model || 'google/gemini-2.5-flash',
   };
 }
 
@@ -553,6 +574,91 @@ ipcMain.handle('chat-send', async (_e, messages) => {
 // pop a native notification on completion. Entirely best-effort: any failure
 // (port busy, bad payload, …) is logged once and ignored so the pet keeps
 // working without the integration.
+
+// Voice input (section G): the chat renderer records the mic, downsamples to
+// 16k mono WAV, and hands the base64 here; we transcribe it through an
+// audio-input chat model on the SAME OpenAI-compatible endpoint (no extra
+// account), and the transcript then flows through the normal chat path.
+
+// macOS microphone permission. Must be requested from the main process; the
+// renderer calls this right before its first getUserMedia.
+ipcMain.handle('ensure-mic', async () => {
+  try {
+    if (process.platform === 'darwin') {
+      return await systemPreferences.askForMediaAccess('microphone');
+    }
+    return true;
+  } catch (_) {
+    return true; // let getUserMedia surface the real error
+  }
+});
+
+// Transcribe a base64 16k-mono WAV → { ok, text } | { ok, error }.
+ipcMain.handle('chat-transcribe', async (_e, b64wav) => {
+  const { apiKey, baseURL, sttModel } = loadKimiConfig();
+  if (!apiKey) {
+    return { ok: false, error: '还没配置 API Key（config.json）。' };
+  }
+  if (typeof b64wav !== 'string' || b64wav.length < 1000) {
+    return { ok: false, error: '没录到声音，再试一次？' };
+  }
+  if (b64wav.length > 12 * 1024 * 1024) {
+    return { ok: false, error: '录音太长了，一次最多 1 分钟左右哦。' };
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000);
+  try {
+    const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model: sttModel,
+        temperature: 0,
+        max_tokens: 500,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: STT_PROMPT },
+              {
+                type: 'input_audio',
+                input_audio: { data: b64wav, format: 'wav' },
+              },
+            ],
+          },
+        ],
+      }),
+      signal: ctrl.signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail =
+        (data && data.error && data.error.message) || 'HTTP ' + resp.status;
+      return { ok: false, error: '听写接口报错：' + detail };
+    }
+    const text =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content;
+    if (!text || !text.trim()) {
+      return { ok: false, error: '没听清，再说一遍？' };
+    }
+    return { ok: true, text: text.trim() };
+  } catch (err) {
+    const msg =
+      err && err.name === 'AbortError'
+        ? '听写超时——网络或服务暂时不可用。'
+        : '网络错误：' + ((err && err.message) || String(err));
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(timer);
+  }
+});
 
 // Hooks may be registered BOTH globally (~/.claude/settings.json — every
 // project) and in this repo's .claude/settings.json (works out of the box for
