@@ -56,8 +56,10 @@ function createWindow() {
     },
   });
 
-  // Float above normal windows and follow the user across spaces / fullscreen apps.
-  win.setAlwaysOnTop(true, 'floating');
+  // Pin above EVERYTHING: 'screen-saver' is the highest practical macOS window
+  // level, so the pet stays visible over normal apps, floating palettes and
+  // fullscreen apps alike, and follows the user across spaces.
+  win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   // Start fully click-through. `forward:true` keeps mousemove events flowing to
