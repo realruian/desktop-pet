@@ -63,29 +63,28 @@ const EYES_FRAMES = [
 
 // Claude Code status layer (section D). When non-idle the autonomous scheduler
 // is paused and the dog holds an attentive REST (eyes still track the cursor),
-// with a small status glyph near its head.
-const CLAUDE_GLYPH = {
-  working: '⚙️',
-  waiting: '❗',
-  done: '✅',
-};
-const CLAUDE_DONE_GLYPH_MS = 1500; // how long the ✅ shows on completion
+// with a small status chip floating above its head.
+const CLAUDE_DONE_GLYPH_MS = 1500; // how long the full chip holds on completion
 const CLAUDE_DONE_CLEAR_MS = 4000; // when 'done' clears → scheduler resumes
 
-// Mini progress bar (section D): a very small pill floating above the dog's head
-// that reflects the live task. Claude Code exposes no true "percent done", so we
-// ease toward an HONEST effort estimate — elapsed time + completed tool calls —
-// that asymptotes to a cap BELOW 100% while still working, then snaps to full
-// only when the task actually ends (Stop). So the bar always moves, never lies
-// about being finished, and completing it is a real signal.
-const PROG_W = 64; // bar width (WIN-space px)
-const PROG_H = 5; // bar height
-const PROG_Y = 14; // bar center y (sits above the head)
+// Status chip (section D): one compact, aligned unit above the dog's head —
+// [tiny status indicator] [task label] over a slim progress bar — instead of
+// loose oversized emoji. The indicator is DRAWN (spinner / pulsing dot / check)
+// so it stays crisp at a few px. Claude Code exposes no true "percent done", so
+// the bar eases toward an HONEST effort estimate — elapsed time + completed
+// tool calls — that asymptotes to a cap BELOW 100% while still working, then
+// fills only when the task actually ends (Stop). It always moves, never lies.
+const CHIP_W = 92; // chip width (WIN-space px), centered above the head
+const CHIP_H = 21; // chip height; the resting dog's crown is at y≈21
+const CHIP_Y = 0; // chip top
+const CHIP_PAD = 7; // left/right inner padding
+const CHIP_LABEL_FONT = '9px -apple-system, "PingFang SC", system-ui, sans-serif';
+const PROG_BAR_H = 3; // slim progress bar height (chip row 2)
 const PROG_WORK_CAP = 0.9; // never fill past this while still working
 const PROG_TIME_TAU = 28; // s — elapsed-time contribution constant
 const PROG_TOOL_TAU = 7; // completed tool calls contribution constant
 const PROG_EASE = 6; // per-second lerp rate of displayed → target
-const PROG_FADE_MS = 450; // bar fade-out after the ✅ hold
+const PROG_FADE_MS = 450; // chip fade-out after the done hold
 const PROG_COLOR = {
   working: '#7aa2ff', // calm blue — in progress
   waiting: '#ffcc66', // amber — needs you
@@ -210,11 +209,12 @@ const claude = {
   status: 'idle', // 'idle' | 'working' | 'waiting' | 'done'
   glyphUntil: 0, // performance.now() ms until which the glyph is drawn
   clearTimer: null, // setTimeout id that returns 'done' → idle
-  // Mini progress bar bookkeeping (see PROG_* constants):
+  // Status chip bookkeeping (see CHIP_*/PROG_* constants):
   progress: 0, // displayed fill [0,1], eased toward `target`
   target: 0, // current effort-estimate target [0,1]
   workStart: 0, // performance.now() when the current task began
   toolCount: 0, // completed tool calls in the current task
+  taskLabel: '', // what the task IS — the prompt text (or project name)
 };
 
 // True while a file/folder is being dragged over the dog (section E): show a
@@ -405,83 +405,135 @@ function updateClaudeProgress(now, dt) {
   claude.progress += (claude.target - claude.progress) * k;
 }
 
-// Draw the status / drop glyphs as an OVERLAY, after the click-through hit-test
-// has already sampled the (glyph-free) dog. Keeping glyphs out of the hit-test
-// means the small emoji floating by the dog's head never become draggable nor
-// disturb click-through. Position is screen-stable (top-right of the dog).
-function drawOverlay(now) {
-  // Status glyph: working ⚙️ / waiting ❗ persist; done ✅ only until glyphUntil.
-  let glyph = null;
-  if (claude.status === 'working' || claude.status === 'waiting') {
-    glyph = CLAUDE_GLYPH[claude.status];
-  } else if (claude.status === 'done' && now < claude.glyphUntil) {
-    glyph = CLAUDE_GLYPH.done;
+// Truncate `text` to fit `maxW` px in the current ctx font, with an ellipsis.
+function ellipsize(text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  while (text.length > 1 && ctx.measureText(text + '…').width > maxW) {
+    text = text.slice(0, -1);
   }
-  if (glyph) {
-    ctx.save();
-    ctx.font = '22px system-ui, "Apple Color Emoji", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    // Top-right of the dog's head; fixed in canvas (window) space.
-    ctx.fillText(glyph, WIN - 22, 24);
-    ctx.restore();
-  }
+  return text + '…';
+}
 
-  // Mini progress bar: floats above the head while a task is live, then briefly
-  // fades on completion. Drawn here in the overlay so it never affects the
-  // click-through hit-test. Fill width = eased progress; color encodes state.
-  let barAlpha = 0;
+// The status chip: one compact panel above the dog's head where everything
+// lines up — (row 1) a small DRAWN indicator (spinner / pulsing dot / check,
+// crisp at a few px, no emoji) + the task label, (row 2) the slim progress bar.
+function drawStatusChip(now, alpha) {
+  const x = (WIN - CHIP_W) / 2;
+  const y = CHIP_Y;
+  const color = PROG_COLOR[claude.status] || PROG_COLOR.working;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Panel: dark translucent + hairline border, readable over any wallpaper.
+  ctx.beginPath();
+  ctx.roundRect(x + 0.5, y + 0.5, CHIP_W - 1, CHIP_H - 1, 6);
+  ctx.fillStyle = 'rgba(17,18,26,0.78)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Row 1 — status indicator.
+  const ix = x + CHIP_PAD + 3.5; // indicator center
+  const iy = y + 7.5;
   if (claude.status === 'working') {
-    barAlpha = 1;
-  } else if (claude.status === 'waiting') {
-    barAlpha = 0.75 + 0.25 * (0.5 + 0.5 * Math.sin(now / 320)); // attention pulse
-  } else if (claude.status === 'done') {
-    if (now < claude.glyphUntil) barAlpha = 1;
-    else if (now < claude.glyphUntil + PROG_FADE_MS)
-      barAlpha = 1 - (now - claude.glyphUntil) / PROG_FADE_MS;
-  }
-  if (barAlpha > 0.01) {
-    const x = (WIN - PROG_W) / 2;
-    const y = PROG_Y - PROG_H / 2;
-    const r = PROG_H / 2;
-    ctx.save();
-    ctx.globalAlpha = barAlpha;
-
-    // Track.
+    // Tiny spinner: a 270° arc revolving ~0.8 rev/s.
+    const a0 = (now / 1250) * 2 * Math.PI;
     ctx.beginPath();
-    ctx.roundRect(x, y, PROG_W, PROG_H, r);
-    ctx.fillStyle = 'rgba(16,16,22,0.55)';
+    ctx.arc(ix, iy, 3, a0, a0 + Math.PI * 1.5);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  } else if (claude.status === 'waiting') {
+    // Amber dot, gently pulsing — needs your attention.
+    const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(now / 280));
+    ctx.beginPath();
+    ctx.arc(ix, iy, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha * pulse;
     ctx.fill();
-
-    // Fill (keep a visible rounded cap once any progress exists).
-    const p = clamp(claude.progress, 0, 1);
-    const fillW = p > 0 ? Math.max(PROG_H, PROG_W * p) : 0;
-    if (fillW > 0) {
-      ctx.beginPath();
-      ctx.roundRect(x, y, fillW, PROG_H, r);
-      ctx.fillStyle = PROG_COLOR[claude.status] || PROG_COLOR.working;
-      ctx.fill();
-
-      // Subtle sweeping sheen so 'working' feels alive even near the cap.
-      if (claude.status === 'working') {
-        const sx = x + ((now / 1100) % 1) * fillW;
-        const g = ctx.createLinearGradient(sx - 9, 0, sx + 9, 0);
-        g.addColorStop(0, 'rgba(255,255,255,0)');
-        g.addColorStop(0.5, 'rgba(255,255,255,0.5)');
-        g.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.beginPath();
-        ctx.roundRect(x, y, fillW, PROG_H, r);
-        ctx.fillStyle = g;
-        ctx.fill();
-      }
-    }
-    ctx.restore();
+    ctx.globalAlpha = alpha;
+  } else {
+    // Done: green disc with a crisp white check.
+    ctx.beginPath();
+    ctx.arc(ix, iy, 3.6, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(ix - 1.7, iy + 0.1);
+    ctx.lineTo(ix - 0.4, iy + 1.5);
+    ctx.lineTo(ix + 1.9, iy - 1.4);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
   }
+
+  // Row 1 — task label: what this progress IS the progress of.
+  ctx.font = CHIP_LABEL_FONT;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  const tx = ix + 7;
+  const label = claude.taskLabel || 'Claude 任务';
+  ctx.fillText(ellipsize(label, x + CHIP_W - CHIP_PAD - tx), tx, iy);
+
+  // Row 2 — slim progress bar spanning the chip, aligned under the label.
+  const bx = x + CHIP_PAD;
+  const bw = CHIP_W - CHIP_PAD * 2;
+  const by = y + CHIP_H - PROG_BAR_H - 4;
+  const r = PROG_BAR_H / 2;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, PROG_BAR_H, r);
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fill();
+  const p = clamp(claude.progress, 0, 1);
+  const fillW = p > 0 ? Math.max(PROG_BAR_H, bw * p) : 0;
+  if (fillW > 0) {
+    ctx.beginPath();
+    ctx.roundRect(bx, by, fillW, PROG_BAR_H, r);
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (claude.status === 'working') {
+      // Subtle sweeping sheen so progress feels alive even near the cap.
+      const sx = bx + ((now / 1100) % 1) * fillW;
+      const g = ctx.createLinearGradient(sx - 7, 0, sx + 7, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.5, 'rgba(255,255,255,0.45)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.beginPath();
+      ctx.roundRect(bx, by, fillW, PROG_BAR_H, r);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+// Draw the status chip / drop cue as an OVERLAY, after the click-through
+// hit-test has already sampled the (chip-free) dog. Keeping the overlay out of
+// the hit-test means it never becomes draggable nor disturbs click-through.
+function drawOverlay(now) {
+  // Chip visibility: working/waiting persist; done holds at full until
+  // glyphUntil, then fades out over PROG_FADE_MS; idle → nothing.
+  let chipAlpha = 0;
+  if (claude.status === 'working' || claude.status === 'waiting') {
+    chipAlpha = 1;
+  } else if (claude.status === 'done') {
+    if (now < claude.glyphUntil) chipAlpha = 1;
+    else if (now < claude.glyphUntil + PROG_FADE_MS)
+      chipAlpha = 1 - (now - claude.glyphUntil) / PROG_FADE_MS;
+  }
+  if (chipAlpha > 0.01) drawStatusChip(now, chipAlpha);
 
   // Drop-hover cue: a 📂 centered over the dog inviting the drop (section E).
   if (dropHover) {
     ctx.save();
-    ctx.font = '40px system-ui, "Apple Color Emoji", sans-serif';
+    ctx.font = '30px system-ui, "Apple Color Emoji", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('📂', WIN / 2, WIN / 2);
@@ -847,6 +899,7 @@ function fireClaudeDone() {
   }
   claude.clearTimer = setTimeout(() => {
     claude.status = 'idle';
+    claude.taskLabel = '';
     claude.clearTimer = null;
     // Resume the autonomous scheduler from REST (unless paused/dragging).
     if (!state.paused && !state.dragging) enterRest();
@@ -861,10 +914,21 @@ function resetClaudeProgress() {
   claude.workStart = performance.now();
 }
 
-window.pet.onClaudeEvent(({ event }) => {
+// Derive the chip's task label: the prompt text (whitespace collapsed) or, when
+// that's unavailable (pet launched mid-task / Notification-only), the project
+// folder's name from cwd.
+function taskLabelFrom(prompt, cwd) {
+  const p = (prompt || '').replace(/\s+/g, ' ').trim();
+  if (p) return p.slice(0, 60); // ellipsized to chip width at draw time
+  const parts = (cwd || '').split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+window.pet.onClaudeEvent(({ event, cwd, prompt }) => {
   switch (event) {
     case 'UserPromptSubmit':
       claude.status = 'working';
+      claude.taskLabel = taskLabelFrom(prompt, cwd); // the chip names the task
       resetClaudeProgress(); // fresh task → bar starts at 0
       enterClaudeHold();
       break;
@@ -873,6 +937,7 @@ window.pet.onClaudeEvent(({ event }) => {
       // saw the task start (pet launched mid-task), begin a fresh working bar.
       if (claude.status !== 'working' && claude.status !== 'waiting') {
         claude.status = 'working';
+        claude.taskLabel = taskLabelFrom(null, cwd);
         resetClaudeProgress();
         enterClaudeHold();
       } else if (claude.status === 'waiting') {
@@ -882,6 +947,7 @@ window.pet.onClaudeEvent(({ event }) => {
       break;
     case 'Notification':
       claude.status = 'waiting';
+      if (!claude.taskLabel) claude.taskLabel = taskLabelFrom(null, cwd);
       enterClaudeHold();
       break;
     case 'Stop':

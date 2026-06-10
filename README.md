@@ -22,14 +22,15 @@
 | 🐾 **原地小动作** | 休息一阵后做 1–2 个原地动作（挠头 / 叫 / 躺下打滚），然后继续休息。默认**不自己乱跑**，想让它溜达把 `pet.js` 里的 `WANDER` 改 `true` |
 | 🖱️ **拖动 & 轻点** | 按住身体 1:1 跟手拖到任意位置；轻点一下它会「汪」一声 |
 | 🫥 **像素级点击穿透** | 只有身体不透明像素能被点中，透明区域的点击直接穿透到下面的应用 |
-| 🤖 **Claude Code 状态联动** | 工作中 ⚙️ / 等你确认 ❗ / 已完成 ✅（伴随系统通知），反映**本项目**里 Claude Code 的实时状态 |
-| 📊 **迷你进度条** | 头顶一条很小的进度条：按「已用时长 + 已完成工具调用数」**渐近**估算进度（工作中最多 ~90%，不虚标），任务真正结束（Stop）时才填满；颜色随状态变化（蓝＝工作中 / 琥珀＝等你 / 绿＝完成），完成后淡出 |
+| 🤖 **Claude Code 状态胶囊** | 头顶一枚对齐的迷你状态胶囊：**自绘小指示器**（蓝色旋转圈＝工作中 / 琥珀脉冲点＝等你确认 / 绿色对勾＝完成，伴随系统通知）+ **任务名**（你提交的 prompt 文本，放不下自动截断）+ 细进度条，三件套排成一体，反映**本项目**里 Claude Code 的实时状态 |
+| 📊 **迷你进度条** | 胶囊下沿一条 3px 细进度条：按「已用时长 + 已完成工具调用数」**渐近**估算进度（工作中最多 ~90%，不虚标），任务真正结束（Stop）时才填满变绿，随后整个胶囊淡出 |
 | 📂 **拖文件起终端** | 把 Finder 的文件/文件夹拖到它身上 → 打开 Terminal、`cd` 过去并运行 `claude`；拖的是文件时还会把 `@文件名` 预填进输入框（不自动发送） |
 | 🖱️ **右键菜单** | 暂停/继续走动、退出 |
 
 ### 原理简述
 
 - **状态联动**：主进程在 `127.0.0.1:4319` 起一个本地 HTTP 监听；本项目 `.claude/settings.json` 里的 hooks 用 `curl` 把 `UserPromptSubmit / PostToolUse / Notification / Stop / SubagentStop` 事件转发过去（桌宠没开时 `curl` 秒失败、完全不影响 Claude Code）。
+- **状态胶囊**：任务名取自 `UserPromptSubmit` hook 携带的 prompt 文本（缺省退化为项目目录名）；指示器（旋转圈/脉冲点/对勾）全部用 Canvas 路径**手绘**，几个像素也保持锐利，不用 emoji。
 - **迷你进度条**：Claude Code 没有真实「百分比」，所以进度条用「已用时长 + 已完成工具调用数（`PostToolUse`）」拟合一个**渐近**估计值——工作中最多涨到 ~90%，只有任务真正结束（`Stop`）才填满。好处是它一直在动、又绝不虚报完成。
 - **眼睛跟随**：主进程每 ~33ms 读 `screen.getCursorScreenPoint()`，按「狗 → 鼠标」方向选注视帧并淡入。
 - **拖文件起终端**：通过 `osascript` 驱动 AppleScript 打开 Terminal 并执行命令；预填 `@文件名` 需要一次「辅助功能」授权。
@@ -78,9 +79,9 @@ SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
 
 ## 当前状态
 
-可用（v2）。已实现：固定休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、Claude Code 状态联动（含系统通知 + 头顶迷你进度条）、拖文件/文件夹起终端。默认关闭自主乱跑（`WANDER=false`）。
+可用（v2）。已实现：固定休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、Claude Code 状态胶囊（任务名 + 迷你进度条 + 系统通知）、拖文件/文件夹起终端。默认关闭自主乱跑（`WANDER=false`）。
 
-常用调参见 `renderer/pet.js` 顶部（`WIN` / `WANDER` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `PROG_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
+常用调参见 `renderer/pet.js` 顶部（`WIN` / `WANDER` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `CHIP_*` / `PROG_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
 
 ---
 

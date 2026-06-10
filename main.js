@@ -227,10 +227,14 @@ function startClaudeServer() {
         req.on('end', () => {
           let event = null;
           let cwd = null;
+          let prompt = null;
           try {
             const payload = JSON.parse(body || '{}');
             event = payload.hook_event_name || null;
             cwd = payload.cwd || null;
+            // UserPromptSubmit carries the user's prompt text — the pet shows a
+            // truncated version of it as the task label on the status chip.
+            if (typeof payload.prompt === 'string') prompt = payload.prompt;
           } catch (_) {
             /* malformed payload → just ack below, nothing to forward */
           }
@@ -239,7 +243,7 @@ function startClaudeServer() {
             // progress bar); don't spam the log with each one.
             if (event !== 'PostToolUse') console.log('[claude] ' + event);
             if (win && !win.isDestroyed()) {
-              win.webContents.send('claude-event', { event, cwd });
+              win.webContents.send('claude-event', { event, cwd, prompt });
             }
             // Native notification on task completion.
             if (event === 'Stop' && Notification.isSupported()) {
