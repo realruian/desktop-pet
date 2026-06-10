@@ -100,10 +100,15 @@ function autosize() {
 // a normal text bubble.
 
 const REC_MAX_MS = 60 * 1000; // safety cap per recording
+const PLACEHOLDER_IDLE = '跟多吉说点什么…';
+const PLACEHOLDER_PTT = '多吉在听…松开按键自动发送';
 let rec = null; // active MediaRecorder (null = not recording)
 let recChunks = [];
 let recStream = null;
 let recTimer = null;
+// True when the current recording was started by the global push-to-talk
+// hotkey: releasing any key then stops it (hold-to-talk feel).
+let pttActive = false;
 
 async function toggleRecording() {
   if (rec) {
@@ -127,13 +132,16 @@ async function toggleRecording() {
   rec.start();
   micEl.classList.add('recording');
   micEl.textContent = '■';
+  if (pttActive) inputEl.placeholder = PLACEHOLDER_PTT;
   recTimer = setTimeout(() => rec && rec.stop(), REC_MAX_MS);
 }
 
 async function onRecordingStop() {
   clearTimeout(recTimer);
+  pttActive = false;
   micEl.classList.remove('recording');
   micEl.textContent = '🎤';
+  inputEl.placeholder = PLACEHOLDER_IDLE;
   if (recStream) recStream.getTracks().forEach((t) => t.stop());
   recStream = null;
   const blob = new Blob(recChunks, { type: 'audio/webm' });
@@ -211,6 +219,24 @@ async function blobToWav16kB64(blob) {
 }
 
 micEl.addEventListener('click', toggleRecording);
+
+// Global push-to-talk (hotkey handled in main): press = start recording (the
+// panel pops up focused), release = the keyup below stops it → transcribe →
+// auto-send. Pressing the hotkey again also stops (covers a missed keyup).
+window.chat.onPTT(() => {
+  if (rec) {
+    rec.stop();
+  } else {
+    pttActive = true;
+    toggleRecording();
+  }
+});
+
+// Hold-to-talk release: while a PTT recording is live, ANY key release ends it
+// (the hotkey's keys lift here because the panel grabbed focus on popup).
+window.addEventListener('keyup', () => {
+  if (pttActive && rec) rec.stop();
+});
 
 sendEl.addEventListener('click', () => sendMessage());
 inputEl.addEventListener('input', autosize);

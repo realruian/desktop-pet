@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('chat', {
   ensureMic: () => ipcRenderer.invoke('ensure-mic'),
   // Hide the panel (✕ button / Esc).
   hide: () => ipcRenderer.send('chat-hide'),
+  // Push-to-talk: main fires this when the global hotkey is pressed.
+  onPTT: (cb) => ipcRenderer.on('ptt-down', () => cb()),
 });

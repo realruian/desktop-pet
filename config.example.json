@@ -12,5 +12,9 @@
   "stt": {
     "model": "google/gemini-2.5-flash",
     "_说明": "语音转文字用的模型（需支持音频输入、走同一个 API Key）；按 🎤 说话时使用"
+  },
+  "hotkey": {
+    "ptt": "Alt+Space",
+    "_说明": "全局长按说话快捷键（Electron accelerator 格式，Alt 即 Mac 的 Option）；按住说话、松手自动转写发送。和别的应用冲突就换一个，如 Alt+D；改完重启桌宠生效"
   }
 }

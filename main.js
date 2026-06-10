@@ -11,6 +11,7 @@ const {
   Menu,
   Notification,
   systemPreferences,
+  globalShortcut,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -268,12 +269,14 @@ function loadKimiConfig() {
   let cfg = {};
   let obsidian = {};
   let stt = {};
+  let hotkey = {};
   try {
     const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
     const parsed = JSON.parse(raw) || {};
     cfg = parsed.kimi || {};
     obsidian = parsed.obsidian || {};
     stt = parsed.stt || {};
+    hotkey = parsed.hotkey || {};
   } catch (_) {
     /* missing/malformed config.json → fall back to env/defaults */
   }
@@ -287,6 +290,7 @@ function loadKimiConfig() {
     vault: process.env.PET_OBSIDIAN_VAULT || obsidian.vault || '',
     sttModel:
       process.env.PET_STT_MODEL || stt.model || 'google/gemini-2.5-flash',
+    pttHotkey: process.env.PET_PTT_HOTKEY || hotkey.ptt || 'Alt+Space',
   };
 }
 
@@ -755,6 +759,30 @@ app.whenReady().then(() => {
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();
 
+  // Pre-create the (hidden) chat window so push-to-talk pops it instantly.
+  createChatWindow();
+
+  // Push-to-talk (section G): a GLOBAL hotkey — hold to record from anywhere.
+  // Electron only reports key-DOWN for global shortcuts, so the release is
+  // detected by the (now focused) chat renderer via keyup; pressing the hotkey
+  // again also stops, as does the 60s cap. Configurable: config.json
+  // hotkey.ptt (Electron accelerator format), default Alt+Space.
+  const { pttHotkey } = loadKimiConfig();
+  try {
+    const ok = globalShortcut.register(pttHotkey, () => {
+      openChat();
+      if (chatWin) chatWin.webContents.send('ptt-down');
+    });
+    console.log(
+      '[ptt] ' +
+        (ok
+          ? 'hotkey registered: ' + pttHotkey
+          : 'hotkey unavailable (in use by another app): ' + pttHotkey)
+    );
+  } catch (err) {
+    console.log('[ptt] hotkey registration failed: ' + err.message);
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -767,6 +795,7 @@ app.on('before-quit', () => {
 
 // Tear down the hook server on quit so the port is released cleanly.
 app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
   if (claudeServer) {
     try {
       claudeServer.close();
