@@ -841,6 +841,13 @@ canvas.addEventListener('contextmenu', (e) => {
   window.pet.showMenu();
 });
 
+// Double-click on the body → open the chat panel (section F). The first click
+// of the pair still pets the dog (a yip), which makes a nice greeting.
+canvas.addEventListener('dblclick', (e) => {
+  if (!isOverBody(e.clientX, e.clientY)) return;
+  window.pet.openChat();
+});
+
 // ---- File / folder drop → Terminal + Claude Code (section E) -----------------
 //
 // Globally swallow drags so the window never navigates to a dropped file. On

@@ -18,8 +18,29 @@ const WIN = 160;
 // still works without the integration.
 const CLAUDE_PORT = 4319;
 
+// Chat panel size (section F).
+const CHAT_W = 300;
+const CHAT_H = 400;
+
+// The dog's persona for Kimi conversations (section F). Prepended as the
+// system message on every request.
+const PERSONA =
+  '你是住在 macOS 桌面右下角的像素柯基桌宠。性格活泼、粘人、有点小机灵。' +
+  '用中文口语回复，简短（一般不超过三句），偶尔带一声「汪！」或可爱的语气词。' +
+  '你会的本领：被主人拖来拖去、眼睛跟着鼠标转、显示 Claude Code 任务进度、' +
+  '接住拖给你的文件帮主人打开终端。不要用 Markdown 标题或长列表，自然聊天即可。';
+
 /** @type {BrowserWindow|null} */
 let win = null;
+
+// Chat panel window (section F). Created lazily on first open; closing it just
+// HIDES it so the conversation history survives reopening within a session.
+/** @type {BrowserWindow|null} */
+let chatWin = null;
+
+// Set while the app is really quitting, so chatWin's close handler lets the
+// window die instead of hiding it.
+let isQuitting = false;
 
 // Tracks the menu toggle label state ("paused" vs "walking"). The actual
 // behavior pause lives in the renderer; this only drives the menu text.
@@ -127,6 +148,10 @@ ipcMain.on('show-menu', () => {
   if (!win) return;
   const menu = Menu.buildFromTemplate([
     {
+      label: '💬 聊天',
+      click: () => openChat(),
+    },
+    {
       label: isPaused ? '继续走动' : '暂停走动',
       click: () => {
         isPaused = !isPaused;
@@ -207,6 +232,159 @@ ipcMain.on('open-in-claude', (_e, p) => {
     });
   } catch (err) {
     console.log('[claude] open-in-claude error: ' + err.message);
+  }
+});
+
+// ---- Kimi chat (section F) ---------------------------------------------------
+//
+// The pet can hold a conversation through Moonshot's Kimi API. The key lives in
+// the gitignored local config.json (see config.example.json) and never leaves
+// the main process; the chat renderer only ever sees message text.
+
+// Read config.json fresh on every use, so filling in the API key takes effect
+// without restarting the pet. Env vars override (handy for tests):
+//   PET_KIMI_KEY / PET_KIMI_BASE / PET_KIMI_MODEL
+function loadKimiConfig() {
+  let cfg = {};
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
+    cfg = (JSON.parse(raw) || {}).kimi || {};
+  } catch (_) {
+    /* missing/malformed config.json → fall back to env/defaults */
+  }
+  return {
+    apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
+    baseURL:
+      process.env.PET_KIMI_BASE ||
+      cfg.baseURL ||
+      'https://api.moonshot.cn/v1',
+    model: process.env.PET_KIMI_MODEL || cfg.model || 'kimi-latest',
+  };
+}
+
+function createChatWindow() {
+  chatWin = new BrowserWindow({
+    width: CHAT_W,
+    height: CHAT_H,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    hasShadow: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    useContentSize: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-chat.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  // Same float-above-everything treatment as the pet (section: requirement 3).
+  chatWin.setAlwaysOnTop(true, 'screen-saver');
+  chatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  chatWin.loadFile(path.join(__dirname, 'renderer', 'chat.html'));
+
+  // Closing hides (history survives); only a real quit destroys the window.
+  chatWin.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      chatWin.hide();
+    }
+  });
+  chatWin.on('closed', () => {
+    chatWin = null;
+  });
+}
+
+// Show the chat panel anchored to the pet: right-aligned with the dog, sitting
+// just above it, clamped into the work area.
+function openChat() {
+  if (!chatWin) createChatWindow();
+  if (win) {
+    const [px, py] = win.getPosition();
+    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+    const x = Math.max(
+      wa.x + 8,
+      Math.min(px + WIN - CHAT_W, wa.x + wa.width - CHAT_W - 8)
+    );
+    const y = Math.max(wa.y + 8, py - CHAT_H - 6);
+    chatWin.setPosition(Math.round(x), Math.round(y));
+  }
+  chatWin.show();
+  chatWin.focus();
+}
+
+ipcMain.on('open-chat', openChat);
+
+ipcMain.on('chat-hide', () => {
+  if (chatWin) chatWin.hide();
+});
+
+// Round-trip one conversation to Kimi. `messages` is the renderer's history
+// ({role:'user'|'assistant', content} only — we prepend the persona here).
+// Resolves {ok:true, content} | {ok:false, error}; never throws to the caller.
+ipcMain.handle('chat-send', async (_e, messages) => {
+  const { apiKey, baseURL, model } = loadKimiConfig();
+  if (!apiKey) {
+    return {
+      ok: false,
+      error:
+        '还没配置 Kimi API Key：把项目里的 config.example.json 复制为 ' +
+        'config.json，填入你的 Moonshot Key（sk- 开头）即可，无需重启。',
+    };
+  }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { ok: false, error: '没有可发送的消息。' };
+  }
+  const sane = messages
+    .filter(
+      (m) =>
+        m &&
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string'
+    )
+    .map((m) => ({ role: m.role, content: m.content }));
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: PERSONA }, ...sane],
+        temperature: 0.6,
+        max_tokens: 1024,
+      }),
+      signal: ctrl.signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail =
+        (data && data.error && data.error.message) || 'HTTP ' + resp.status;
+      return { ok: false, error: 'Kimi 接口报错：' + detail };
+    }
+    const content =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content;
+    if (!content) return { ok: false, error: 'Kimi 返回了空回复，再试一次？' };
+    return { ok: true, content };
+  } catch (err) {
+    const msg =
+      err && err.name === 'AbortError'
+        ? '请求超时（30s）——网络或服务暂时不可用。'
+        : '网络错误：' + ((err && err.message) || String(err));
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(timer);
   }
 });
 
@@ -295,6 +473,11 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// Let the chat window's close handler know this close is for real.
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 // Tear down the hook server on quit so the port is released cleanly.

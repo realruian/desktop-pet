@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('pet', {
   quit: () => ipcRenderer.send('quit'),
   // Open a dropped file/folder in Terminal.app running Claude Code (section E).
   openInClaude: (p) => ipcRenderer.send('open-in-claude', p),
+  // Open the chat panel (section F) — double-click on the body / context menu.
+  openChat: () => ipcRenderer.send('open-chat'),
 
   // Request/response queries -------------------------------------------------
   getPos: () => ipcRenderer.invoke('get-pos'), // -> [x, y]
