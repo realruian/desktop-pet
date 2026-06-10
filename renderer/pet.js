@@ -25,11 +25,14 @@ const DOG_Y = WIN - DOG;
 const WALK_SPEED = 130; // px/s while walking
 
 // Autonomous wandering. true = the dog takes short strolls NEAR ITS HOME spot
-// (within HOME_RANGE) and always walks back home before resting again, so it
-// never drifts across the screen. Dragging it somewhere makes that spot the new
-// home. false = strictly in-place activities only.
+// and always walks back home before resting again, so it never drifts across
+// the screen. Strolls are strictly HORIZONTAL (the walk art is a side profile —
+// diagonal/vertical sliding looks wrong), so the dog paces left/right along its
+// home's level. Dragging it somewhere makes that spot the new home. false =
+// strictly in-place activities only.
 const WANDER = true;
-const HOME_RANGE = 130; // max stroll distance from home (px)
+const HOME_RANGE = 240; // max stroll distance from home (px, horizontal)
+const STROLL_MIN = 60; // min stroll distance — keep walks visible
 const HOME_EPS = 8; // "close enough to home" — skip the walk back
 const ALPHA_THRESHOLD = 30; // alpha above this counts as "over the body"
 const TAP_SLOP = 4; // px of movement below which a press counts as a tap
@@ -722,14 +725,16 @@ function startWalk() {
     const minY = wa.y;
     const maxY = wa.y + wa.height - WIN;
 
-    // Stroll target: a random point NEAR HOME (radius ≤ HOME_RANGE around the
-    // home spot, not the current position), clamped on-screen — so consecutive
-    // walks can never drift the dog away from where it lives.
+    // Stroll target: HORIZONTAL only, anchored on HOME (not the current
+    // position, so consecutive walks can never drift the dog away). Pick the
+    // side with room: near a screen edge, walk toward the open side.
     const home = state.home || state.pos;
-    const ang = rand(0, 2 * Math.PI);
-    const rad = rand(36, HOME_RANGE);
-    const tx = clamp(home.x + Math.cos(ang) * rad, minX, maxX);
-    const ty = clamp(home.y + Math.sin(ang) * rad, minY, maxY);
+    const reach = (d) => (d === 1 ? maxX - home.x : home.x - minX);
+    let dir = Math.random() < 0.5 ? -1 : 1;
+    if (reach(dir) < STROLL_MIN && reach(-dir) > reach(dir)) dir = -dir;
+    const span = Math.min(HOME_RANGE, Math.max(reach(dir), 0));
+    const tx = home.x + dir * rand(Math.min(STROLL_MIN, span), span);
+    const ty = clamp(home.y, minY, maxY); // stay on home's level
 
     state.facingRight = tx > state.pos.x;
     walkTarget = { x: tx, y: ty };
