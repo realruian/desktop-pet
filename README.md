@@ -53,6 +53,18 @@
 
 ## 如何运行
 
+### 日常使用：独立 App（推荐）
+
+```bash
+npm install
+npm run pack     # 打包出 dist/多吉-darwin-arm64/多吉.app
+cp -R dist/多吉-darwin-arm64/多吉.app /Applications/
+```
+
+之后**双击「多吉」即可启动**；首次启动会自动注册**开机自启**（右键多吉 → 取消勾选「开机自启」可关闭）。App 不占 Dock、不进 ⌘Tab（LSUIElement），同时只会运行一个实例。新 App 首次用麦克风 / 弹通知 / 开终端时，macOS 会各弹一次授权。
+
+### 开发调试
+
 需要 macOS + Node.js。
 
 ```bash
@@ -62,7 +74,7 @@ npm start        # 启动桌宠（等价于 electron .）
 
 启动后柯基出现在主屏**右下角**。退出：**右键 → 退出**。
 
-**开启 Kimi 聊天**：把 `config.example.json` 复制为 `config.json`，填入你的 API Key——[OpenRouter](https://openrouter.ai)（`sk-or-` 开头，可路由 Kimi 等数百模型）或 [Moonshot 直连](https://platform.moonshot.cn) 均可——无需重启。`config.json` 已被 `.gitignore` 排除，Key 只留在你本机。
+**开启 Kimi 聊天**：参考 `config.example.json`，在 **`~/Library/Application Support/corgi-desktop-pet/config.json`** 填入你的 API Key——[OpenRouter](https://openrouter.ai)（`sk-or-` 开头，可路由 Kimi 等数百模型）或 [Moonshot 直连](https://platform.moonshot.cn) 均可——无需重启（打包版和开发版读同一份配置；项目根目录的 `config.json` 仍可作为开发兜底，已被 `.gitignore` 排除）。
 
 **开启笔记问答**：在 `config.json` 的 `obsidian.vault` 填上你的 Obsidian 库路径即可（vault 列表可在 `~/Library/Application Support/obsidian/obsidian.json` 查到）。
 
@@ -78,6 +90,7 @@ npm start        # 启动桌宠（等价于 electron .）
 main.js                 主进程：透明窗口 / IPC / 右键菜单 / 光标轮询 / Claude hook 监听 / 拖文件起终端 / Kimi 聊天
 preload.js              桌宠窗口的安全 IPC 桥（暴露 window.pet.*）
 preload-chat.js         聊天窗口的安全 IPC 桥（暴露 window.chat.*）
+build/                  打包资源：icon.icns（像素狗头图标）、extend.plist（麦克风等权限声明）、make-icon.py
 renderer/
   index.html            铺满窗口的单个 <canvas>
   style.css             透明、像素渲染
@@ -94,7 +107,7 @@ SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
 
 ## 当前状态
 
-可用（v6）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（全机多会话、任务名、完成 ✅+汪 + 系统通知）、拖文件/文件夹起终端、和多吉聊天（双击狗身，Kimi）、语音说话（🎤 转写后文字回复）、Obsidian 笔记问答。
+可用（v7）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（全机多会话、任务名、完成 ✅+汪 + 系统通知）、拖文件/文件夹起终端、和多吉聊天（双击狗身，Kimi）、语音说话（🎤 / 全局 ⌥Space 长按）、Obsidian 笔记问答、**独立 .app 打包（像素狗头图标、开机自启、单实例）**。
 
 常用调参见 `renderer/pet.js` 顶部（`WIN` / `DOG` / `WANDER` / `HOME_RANGE` / `STROLL_MIN` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `CHIP_*` / `PROG_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS` / `CHAT_W/H` / `PERSONA` / `VAULT_*`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
 

@@ -1,8 +1,13 @@
 # ── 依赖与构建产物 ────────────────────────────────────────────
+# （build/ 不忽略：那里放打包资源 icon.icns / extend.plist / make-icon.py）
 node_modules/
 dist/
-build/
 out/
+build/icon.iconset/
+
+# ── 本地杂项备份 ─────────────────────────────────────────────
+_asset_repair_backup_*/
+_qa_contact_sheets/
 
 # ── PyInstaller / 像素动画生成实验的运行输出（体积大、与本项目无关）──
 *_run/

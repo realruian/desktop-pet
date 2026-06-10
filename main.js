@@ -18,8 +18,23 @@ const fs = require('fs');
 const http = require('http');
 const { execFile } = require('child_process');
 
+// Only one 多吉 at a time: a second launch (double-clicking the .app while
+// it's already running, say) just exits, after nudging the first instance.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
 // Window is a WIN×WIN square; the canvas inside is drawn at this size.
 const WIN = 160;
+
+// Where user-editable config lives. The packaged .app is read-only (asar), so
+// config.json's real home is the per-user Application Support dir; the repo's
+// ./config.json still works as a fallback for development checkouts.
+const CONFIG_DIR = app.getPath('userData');
+const CONFIG_PATHS = [
+  path.join(CONFIG_DIR, 'config.json'),
+  path.join(__dirname, 'config.json'),
+];
 
 // Loopback port for the Claude Code hook server (section D). Claude Code's hooks
 // POST their JSON payloads here; we forward the event to the renderer so the pet
@@ -178,6 +193,19 @@ ipcMain.on('show-menu', () => {
         win.webContents.send('menu-command', 'toggle-pause');
       },
     },
+    // Login-item control only makes sense for the packaged .app (in dev it
+    // would register the bare Electron binary).
+    ...(app.isPackaged
+      ? [
+          {
+            label: '开机自启',
+            type: 'checkbox',
+            checked: app.getLoginItemSettings().openAtLogin,
+            click: (item) =>
+              app.setLoginItemSettings({ openAtLogin: item.checked }),
+          },
+        ]
+      : []),
     { type: 'separator' },
     {
       label: '退出',
@@ -270,15 +298,18 @@ function loadKimiConfig() {
   let obsidian = {};
   let stt = {};
   let hotkey = {};
-  try {
-    const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
-    const parsed = JSON.parse(raw) || {};
-    cfg = parsed.kimi || {};
-    obsidian = parsed.obsidian || {};
-    stt = parsed.stt || {};
-    hotkey = parsed.hotkey || {};
-  } catch (_) {
-    /* missing/malformed config.json → fall back to env/defaults */
+  for (const p of CONFIG_PATHS) {
+    try {
+      const raw = fs.readFileSync(p, 'utf8');
+      const parsed = JSON.parse(raw) || {};
+      cfg = parsed.kimi || {};
+      obsidian = parsed.obsidian || {};
+      stt = parsed.stt || {};
+      hotkey = parsed.hotkey || {};
+      break; // first existing config wins (userData, then repo checkout)
+    } catch (_) {
+      /* try the next location; none → env/defaults */
+    }
   }
   return {
     apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
@@ -496,8 +527,9 @@ ipcMain.handle('chat-send', async (_e, messages) => {
     return {
       ok: false,
       error:
-        '还没配置 API Key：把项目里的 config.example.json 复制为 config.json，' +
-        '填入你的 Key（OpenRouter 或 Moonshot 均可）即可，无需重启。',
+        '还没配置 API Key：参考 config.example.json，在 ' +
+        path.join(CONFIG_DIR, 'config.json') +
+        ' 填入你的 Key（OpenRouter 或 Moonshot 均可）即可，无需重启。',
     };
   }
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -755,6 +787,26 @@ function startClaudeServer() {
 app.whenReady().then(() => {
   // Headless dock: this is an overlay pet, not a normal app window.
   app.dock?.hide();
+
+  // Say which config file is in effect (or that none was found).
+  const activeCfg = CONFIG_PATHS.find((p) => fs.existsSync(p));
+  console.log('[cfg] ' + (activeCfg || 'no config.json found (env/defaults)'));
+
+  // Packaged first run: enable open-at-login once (the right-click menu's
+  // 开机自启 checkbox can turn it back off any time).
+  if (app.isPackaged) {
+    const flag = path.join(CONFIG_DIR, '.login-item-initialized');
+    if (!fs.existsSync(flag)) {
+      try {
+        app.setLoginItemSettings({ openAtLogin: true });
+        fs.writeFileSync(flag, '1');
+        console.log('[login] open-at-login enabled (first packaged run)');
+      } catch (err) {
+        console.log('[login] could not set login item: ' + err.message);
+      }
+    }
+  }
+
   createWindow();
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();

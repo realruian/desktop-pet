@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Voice input (🎤 / hold ⌥Space). Without this key macOS terminates a
+       packaged app the moment it touches the microphone. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>多吉需要使用麦克风来听你说话（语音输入）。</string>
+  <!-- Drop-a-folder → AppleScript drives Terminal.app to launch Claude Code. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>多吉需要控制「终端」来帮你打开 Claude Code。</string>
+  <!-- Agent app: never shows in the Dock or the ⌘Tab switcher. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
