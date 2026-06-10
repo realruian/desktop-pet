@@ -193,15 +193,18 @@ function pickActivity() {
 }
 
 // Map the cursor direction (from the dog's center) to a 0-based gaze frame.
-// frame 01 == looking East/right; even ~40° steps CCW (up = positive).
+// The 9 frames sweep CLOCKWISE in screen space (the "顺时针" set): frame 01 looks
+// East/right, then each +40° step goes clockwise (down → left → up). So we measure
+// the dog→cursor angle in SCREEN coordinates (y grows downward, i.e. NO negation):
+// straight-down = +90°, left = 180°, up = 270°. Verified end-to-end against the
+// rendered frames — negating y here is what made the gaze point the wrong way.
 function gazeFrameIndex() {
   // No cursor sample yet → look straight ahead (East == frame 0).
   if (latestCursor.x < 0) return 0;
   const centerX = state.pos.x + WIN / 2;
   const centerY = state.pos.y + WIN / 2;
   const angleDeg =
-    (Math.atan2(-(latestCursor.y - centerY), latestCursor.x - centerX) *
-      180) /
+    (Math.atan2(latestCursor.y - centerY, latestCursor.x - centerX) * 180) /
       Math.PI +
     360;
   const a = angleDeg % 360;
