@@ -46,7 +46,7 @@
 - **状态胶囊**：任务名取自 `UserPromptSubmit` hook 携带的 prompt 文本（缺省退化为项目目录名）；指示器（旋转圈/脉冲点/对勾）全部用 Canvas 路径**手绘**，几个像素也保持锐利，不用 emoji。
 - **为什么没有进度条**：Claude Code 没有真实「百分比」，能确定的只有「还在跑 / 跑完了」。所以胶囊只声称它真正知道的事，完成那一刻用 ✅ + 一声汪明确告诉你。
 - **眼睛跟随**：主进程每 ~33ms 读 `screen.getCursorScreenPoint()`，按「狗 → 鼠标」方向选注视帧并淡入。
-- **拖文件起终端**：系统拖拽期间 macOS **不派发任何鼠标事件**（事件流被拖拽会话接管），穿透开关因此不能依赖 mousemove——桌宠用主进程的全局光标轮询持续做像素命中测试，拖着文件悬停到狗身上的那一刻实时解除点击穿透，窗口才能成为合法拖放目标。落下后通过 `osascript` 驱动 AppleScript 打开 Terminal 并执行命令；预填 `@文件名` 需要一次「辅助功能」授权。
+- **拖文件起终端（影子接驳窗）**：两条在真机上实测出来的 macOS 规则决定了实现方式——① 配置过点击穿透（`setIgnoreMouseEvents`）的窗口**永远收不到拖拽事件**，事后解除穿透、降窗口层级都救不回来（同配置但从未穿透过的对照窗口收得好好的）；② 拖拽期间系统**不派发任何鼠标事件**，没法事件驱动地反应。所以桌宠用一个微型 python 子进程（pyobjc）盯住系统拖拽剪贴板 + 鼠标键状态：一旦发现你在拖文件（全机任何位置），立刻在狗的位置显示一个隐形的、**从未穿透过**的「接驳窗」接住悬停与投放，转发给狗（亮 📂 → 吃进去 → 开终端），松手即隐藏——像素级点击穿透零损失。落下后通过 `osascript` 驱动 AppleScript 打开 Terminal 并执行命令；预填 `@文件名` 需要一次「辅助功能」授权。拖放功能需要系统有 `python3` + `pyobjc`（缺了不影响其它功能，只是失去拖放）。
 - **Kimi 聊天**：请求在**主进程**完成（API Key 永不进渲染层）；Key/模型/接口地址放在 gitignore 掉的本地 `config.json`（模板见 `config.example.json`），每次发送时现读——填好 Key 即刻生效、无需重启。柯基人设通过 system prompt 注入。任何 OpenAI 兼容接口均可（默认 OpenRouter 路由 `moonshotai/kimi-k2.5`，也可 Moonshot 直连）。
 - **Obsidian 检索**：轻量本地 RAG——把问题切成中文双字组合 + 英文词，扫描库内全部 `.md`（跳过 `.obsidian`/Excalidraw，单文件 ≤200KB，上限 4000 篇），按命中数打分（标题命中 ×4 加权），取最相关 4 篇、每篇截取命中处约 420 字，作为 system 参考消息随问题发出。五百篇规模检索耗时 <1 秒，全程不联网（除发给模型那一步）。
 - **语音输入**：渲染层 `MediaRecorder` 录 webm/opus → `decodeAudioData` + `OfflineAudioContext` 重采样为 16kHz 单声道 → 手写 WAV 编码 → base64 交主进程 → 以 `input_audio` 调同一 OpenRouter Key 下的音频模型（默认 `google/gemini-2.5-flash`，`config.json` 的 `stt.model` 可换）逐字转写 → 转写文本走正常聊天链路。单次录音上限 1 分钟；麦克风权限由主进程 `askForMediaAccess` 申请。

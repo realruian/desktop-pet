@@ -30,4 +30,12 @@ contextBridge.exposeInMainWorld('pet', {
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, p) => cb(p)),
   // Claude Code hook events forwarded by main: { event, cwd } (section D).
   onClaudeEvent: (cb) => ipcRenderer.on('claude-event', (_e, d) => cb(d)),
+  // System file-drag started/ended anywhere on the machine (section E). The
+  // pet keeps ignoring mouse events during the drag; the catcher window
+  // shown at its bounds is what actually receives the drop.
+  onDragMode: (cb) => ipcRenderer.on('drag-mode', (_e, on) => cb(on)),
+  // Relayed from the catcher: a drag is hovering the dog (show the 📂 cue).
+  onDropHover: (cb) => ipcRenderer.on('drop-hover', (_e, on) => cb(on)),
+  // Relayed from the catcher: a file/folder was dropped on the dog.
+  onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
 });

@@ -16,7 +16,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 // Only one 多吉 at a time: a second launch (double-clicking the .app while
 // it's already running, say) just exits, after nudging the first instance.
@@ -782,6 +782,148 @@ function startClaudeServer() {
   }
 }
 
+// ---- System-drag watcher + drop catcher (section E) ---------------------------
+//
+// Two macOS facts shape this design, both established empirically on this very
+// machine (sibling test windows, real drags):
+//   1. A window that has EVER been click-through-configured
+//      (setIgnoreMouseEvents) stops receiving drag-destination events for
+//      good — lifting the ignore and/or lowering the level doesn't bring them
+//      back. An otherwise identical transparent window that never ignored the
+//      mouse receives drags fine. So the pet window itself can never catch
+//      drops.
+//   2. During a system drag NO mouse events are delivered at all, so nothing
+//      event-driven can react to the drag "arriving".
+//
+// Solution: a tiny helper process watches the global drag pasteboard's
+// changeCount plus the left-button state. While ANY file drag is in flight
+// anywhere on the machine, an invisible, never-ignoring "drop catcher" window
+// (the exact recipe verified to receive drags) is shown at the dog's bounds to
+// catch the drop; the pet renderer is told to keep itself ignoring so the
+// catcher (at a lower window level) is what macOS targets. The catcher relays
+// hover (📂 cue) and the dropped path (eat + Terminal). On release it hides
+// again — pixel-perfect click-through is never compromised.
+//
+// Needs python3 + pyobjc; if either is missing the watcher exits immediately
+// and the pet just degrades to not accepting drops (logged, never fatal).
+let dragWatcher = null;
+let systemDragActive = false;
+let dropCatcher = null;
+let catcherHideTimer = null;
+
+function createDropCatcher() {
+  dropCatcher = new BrowserWindow({
+    width: WIN,
+    height: WIN,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    fullscreenable: false,
+    focusable: false,
+    useContentSize: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-catcher.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  // 'floating' is the level empirically verified to receive drag events; the
+  // catcher must NEVER call setIgnoreMouseEvents or it inherits the curse.
+  dropCatcher.setAlwaysOnTop(true, 'floating');
+  dropCatcher.loadFile(path.join(__dirname, 'renderer', 'catcher.html'));
+  dropCatcher.on('closed', () => {
+    dropCatcher = null;
+  });
+}
+
+function setSystemDragActive(on) {
+  if (on === systemDragActive) return;
+  systemDragActive = on;
+  // Tell the pet: while a drag is live it must keep ignoring mouse events so
+  // macOS targets the catcher beneath it, and must not fight that state.
+  if (win) {
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.webContents.send('drag-mode', on);
+  }
+  if (!dropCatcher) return;
+  clearTimeout(catcherHideTimer);
+  if (on) {
+    if (win) dropCatcher.setBounds(win.getBounds());
+    dropCatcher.showInactive(); // never steal focus from the drag source
+  } else {
+    // Delay the hide: the watcher notices the button release within ~50ms,
+    // which can be BEFORE the drop event reaches the catcher's renderer.
+    catcherHideTimer = setTimeout(() => {
+      if (dropCatcher) dropCatcher.hide();
+      if (win) win.webContents.send('drop-hover', false);
+    }, 350);
+  }
+}
+
+function startDragWatcher() {
+  const py = [
+    'import time',
+    'import Quartz',
+    'from AppKit import NSPasteboard',
+    "pb = NSPasteboard.pasteboardWithName_('Apple CFPasteboard drag')",
+    'last = pb.changeCount()',
+    'active = False',
+    'while True:',
+    '    btn = Quartz.CGEventSourceButtonState(Quartz.kCGEventSourceStateCombinedSessionState, 0)',
+    '    cc = pb.changeCount()',
+    '    if not active:',
+    '        if btn and cc != last:',
+    "            active = True",
+    "            print('S', flush=True)",
+    '        elif not btn:',
+    '            last = cc',
+    '    else:',
+    '        if not btn:',
+    '            active = False',
+    '            last = pb.changeCount()',
+    "            print('E', flush=True)",
+    '    time.sleep(0.05)',
+  ].join('\n');
+  try {
+    dragWatcher = spawn('/usr/bin/python3', ['-u', '-c', py], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch (err) {
+    console.log('[drag] watcher spawn failed: ' + err.message);
+    return;
+  }
+  dragWatcher.stdout.on('data', (chunk) => {
+    for (const line of String(chunk).split('\n')) {
+      if (line === 'S') setSystemDragActive(true);
+      else if (line === 'E') setSystemDragActive(false);
+    }
+  });
+  dragWatcher.on('error', (err) => {
+    console.log('[drag] watcher unavailable: ' + err.message);
+    dragWatcher = null;
+  });
+  dragWatcher.on('exit', (code) => {
+    console.log('[drag] watcher exited (' + code + ') — drops disabled');
+    dragWatcher = null;
+    setSystemDragActive(false);
+  });
+  console.log('[drag] system-drag watcher started');
+}
+
+// Catcher → pet relays. Hover drives the 📂 cue; a dropped path triggers the
+// eat animation + Terminal launch in the pet renderer (its existing flow).
+ipcMain.on('catcher-hover', (_e, on) => {
+  if (win) win.webContents.send('drop-hover', !!on);
+});
+ipcMain.on('catcher-drop', (_e, p) => {
+  if (win && typeof p === 'string' && p) win.webContents.send('drop-path', p);
+  if (dropCatcher) dropCatcher.hide();
+});
+
 // ---- Dev-only test bridge (PET_TEST_PORT) ------------------------------------
 //
 // A tiny loopback eval/capture server used by automated tests to drive the real
@@ -797,7 +939,8 @@ function startTestBridge() {
     req.on('end', async () => {
       try {
         const { op, target, js } = JSON.parse(body || '{}');
-        const w = target === 'chat' ? chatWin : win;
+        const w =
+          target === 'chat' ? chatWin : target === 'catcher' ? dropCatcher : win;
         if (!w) throw new Error('window not ready');
         if (op === 'eval') {
           const result = await w.webContents.executeJavaScript(js, true);
@@ -807,6 +950,20 @@ function startTestBridge() {
           const file = path.join(os.tmpdir(), 'pet-cap-' + Date.now() + '.png');
           fs.writeFileSync(file, img.toPNG());
           res.end(JSON.stringify({ ok: true, file }));
+        } else if (op === 'drag') {
+          // Start a REAL native drag session carrying the file in `js`, so
+          // drag-destination behavior can be tested without a human hand.
+          const { nativeImage } = require('electron');
+          const icon = nativeImage
+            .createFromPath(path.join(__dirname, 'assets', 'eyes', 'forward.png'))
+            .resize({ width: 24 });
+          w.webContents.startDrag({ file: js, icon });
+          res.end(JSON.stringify({ ok: true }));
+        } else if (op === 'mainEval') {
+          // Evaluate in the MAIN process (window level, ignore state, …).
+          // eslint-disable-next-line no-eval
+          const result = await eval(js);
+          res.end(JSON.stringify({ ok: true, result }));
         } else {
           throw new Error('unknown op');
         }
@@ -848,6 +1005,15 @@ app.whenReady().then(() => {
   createWindow();
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();
+  // Drop catcher + system-drag watcher: file drops onto the dog (section E).
+  createDropCatcher();
+  startDragWatcher();
+  // Keep the catcher glued to the dog if it wanders mid-drag.
+  win.on('move', () => {
+    if (systemDragActive && dropCatcher && win) {
+      dropCatcher.setBounds(win.getBounds());
+    }
+  });
   // Dev-only eval/capture bridge; inert unless PET_TEST_PORT is set.
   startTestBridge();
 
@@ -887,6 +1053,7 @@ app.on('before-quit', () => {
 
 // Tear down the hook server on quit so the port is released cleanly.
 app.on('will-quit', () => {
+  if (dragWatcher) dragWatcher.kill();
   globalShortcut.unregisterAll();
   if (claudeServer) {
     try {

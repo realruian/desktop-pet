@@ -234,6 +234,10 @@ const claude = {
 // 📂 glyph and a tiny scale-up cue inviting the drop.
 let dropHover = false;
 
+// True while ANY system file drag is in flight (fed by main's drag watcher).
+// Main owns the ignore state for the whole drag — see onDragMode below.
+let osDragActive = false;
+
 // Whether the window is currently interactive (mouse-ignore OFF). Mirrors the
 // main process so we only call setIgnore on actual changes (debounce).
 let currentlyInteractive = false;
@@ -310,6 +314,7 @@ function isOverBody(cx, cy) {
 // drags, when no mouse events reach the window at all.
 function updateInteractivity() {
   if (state.dragging) return; // never toggle ignore mid-drag
+  if (osDragActive) return; // main owns the ignore state during system drags
   if (latestCursor.x < 0) return; // no cursor sample yet
   const over = isOverBody(
     latestCursor.x - state.pos.x,
@@ -937,12 +942,35 @@ window.pet.onMenuCommand((cmd) => {
 });
 
 // Global cursor feed (screen points) → aim the resting gaze AND re-test
-// click-through right away. The immediate call (not waiting for the next rAF)
-// is what makes the window a drop target while a file drag hovers the body:
-// drags suppress mouse events, so this poll is the only live cursor signal.
+// click-through right away (the dog may move/breathe under a still cursor).
 window.pet.onCursor((p) => {
   latestCursor = { x: p.x, y: p.y };
   updateInteractivity();
+});
+
+// System-drag mode (section E): while any file drag is in flight, an
+// invisible catcher window is shown at the dog's bounds to receive the drop
+// (this window can't — macOS never delivers drag events to a window that has
+// ever been click-through-configured). The pet must keep IGNORING mouse
+// events for the whole drag so macOS targets the catcher beneath it; main
+// already forced that — just mirror it and stand down until the drag ends.
+window.pet.onDragMode((on) => {
+  osDragActive = on;
+  currentlyInteractive = false;
+  if (!on) {
+    dropHover = false;
+    updateInteractivity();
+  }
+});
+
+// Catcher relays (section E): drag hover drives the 📂 cue; a dropped path
+// triggers the swallow + Terminal launch.
+window.pet.onDropHover((on) => {
+  dropHover = !!on;
+});
+window.pet.onDropPath((p) => {
+  dropHover = false;
+  eatAndOpen(p);
 });
 
 // ---- Claude Code status layer (section D) -----------------------------------
