@@ -782,6 +782,44 @@ function startClaudeServer() {
   }
 }
 
+// ---- Dev-only test bridge (PET_TEST_PORT) ------------------------------------
+//
+// A tiny loopback eval/capture server used by automated tests to drive the real
+// windows (executeJavaScript) and verify pixels (capturePage). It never starts
+// unless the PET_TEST_PORT env var is set, so normal runs carry no extra
+// surface. POST JSON: {op:'eval'|'capture', target:'pet'|'chat', js?}.
+function startTestBridge() {
+  if (!process.env.PET_TEST_PORT) return;
+  const os = require('os');
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', async () => {
+      try {
+        const { op, target, js } = JSON.parse(body || '{}');
+        const w = target === 'chat' ? chatWin : win;
+        if (!w) throw new Error('window not ready');
+        if (op === 'eval') {
+          const result = await w.webContents.executeJavaScript(js, true);
+          res.end(JSON.stringify({ ok: true, result }));
+        } else if (op === 'capture') {
+          const img = await w.webContents.capturePage();
+          const file = path.join(os.tmpdir(), 'pet-cap-' + Date.now() + '.png');
+          fs.writeFileSync(file, img.toPNG());
+          res.end(JSON.stringify({ ok: true, file }));
+        } else {
+          throw new Error('unknown op');
+        }
+      } catch (err) {
+        res.end(JSON.stringify({ ok: false, error: String(err && err.message) }));
+      }
+    });
+  });
+  srv.listen(Number(process.env.PET_TEST_PORT), '127.0.0.1', () => {
+    console.log('[test] bridge on 127.0.0.1:' + process.env.PET_TEST_PORT);
+  });
+}
+
 // ---- App lifecycle ----------------------------------------------------------
 
 app.whenReady().then(() => {
@@ -810,6 +848,8 @@ app.whenReady().then(() => {
   createWindow();
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();
+  // Dev-only eval/capture bridge; inert unless PET_TEST_PORT is set.
+  startTestBridge();
 
   // Pre-create the (hidden) chat window so push-to-talk pops it instantly.
   createChatWindow();

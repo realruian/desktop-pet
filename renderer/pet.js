@@ -203,13 +203,14 @@ let walkTarget = null;
 // phase directly instead of counting as an activity).
 let returningHome = false;
 
-// Last cursor position in canvas/CSS coords; updated on every pointermove.
-let lastCursor = { x: -1, y: -1 };
-
-// Latest global cursor position in SCREEN points, fed by pet.onCursor (~30 Hz).
-// Used to aim the resting dog's gaze (independent of lastCursor, which is the
-// canvas-local sample used for hit-testing). Seeded to the screen center-ish on
-// first real sample; -1 means "no sample yet" → look straight ahead (East).
+// Latest global cursor position in SCREEN points, fed by pet.onCursor (~30 Hz)
+// and refreshed inline by pointermove (which carries screen coords too). Drives
+// BOTH the resting gaze and the click-through hit-test — the hit-test derives
+// client coords by subtracting the window position rather than relying on
+// mousemove events, because macOS stops delivering mousemove during a system
+// drag session while the main process's cursor poll keeps flowing. That is what
+// lets a dragged file un-ignore the window and land on the dog (section E).
+// -1 means "no sample yet" → look straight ahead (East).
 let latestCursor = { x: -1, y: -1 };
 
 // Gaze cross-fade bookkeeping: when the chosen gaze direction changes we fade
@@ -302,13 +303,18 @@ function isOverBody(cx, cy) {
   return alpha > ALPHA_THRESHOLD;
 }
 
-// Re-evaluate click-through against the last known cursor position. Called both
-// on pointermove and every render frame (the dog can move/breathe under a still
-// cursor).
+// Re-evaluate click-through against the latest global cursor sample. Called on
+// every cursor poll tick, on pointermove, and every render frame (the dog can
+// move/breathe under a still cursor). Client coords are derived from the SCREEN
+// cursor minus the window position so the test keeps updating during system
+// drags, when no mouse events reach the window at all.
 function updateInteractivity() {
   if (state.dragging) return; // never toggle ignore mid-drag
-  if (lastCursor.x < 0) return; // no cursor sample yet
-  const over = isOverBody(lastCursor.x, lastCursor.y);
+  if (latestCursor.x < 0) return; // no cursor sample yet
+  const over = isOverBody(
+    latestCursor.x - state.pos.x,
+    latestCursor.y - state.pos.y
+  );
   if (over !== currentlyInteractive) {
     currentlyInteractive = over;
     window.pet.setIgnore(!over); // interactive = NOT ignoring mouse
@@ -523,6 +529,32 @@ function drawOverlay(now) {
     ctx.fillText('📂', WIN / 2, DOG_Y + DOG / 2);
     ctx.restore();
   }
+
+  // Eat animation: the dropped item's glyph accelerates into the mouth,
+  // shrinking and fading as it goes (the chomp clip plays underneath).
+  if (eat.active) {
+    const t = (now - eat.t0) / EAT_FLY_MS;
+    if (t >= 1) {
+      eat.active = false;
+    } else {
+      const k = t * t; // ease-in: the dog sucks it in
+      const mx = WIN / 2; // mouth, roughly mid-face on the front-facing clip
+      const my = DOG_Y + DOG * 0.5;
+      ctx.save();
+      ctx.globalAlpha = 1 - 0.3 * t;
+      ctx.font =
+        Math.max(4, 28 * (1 - 0.85 * k)) +
+        'px system-ui, "Apple Color Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        eat.glyph,
+        eat.from.x + (mx - eat.from.x) * k,
+        eat.from.y + (my - eat.from.y) * k
+      );
+      ctx.restore();
+    }
+  }
 }
 
 let lastTime = performance.now();
@@ -716,8 +748,9 @@ function startWalk() {
 
 canvas.addEventListener('pointermove', (e) => {
   // These arrive even while the window ignores mouse events (forward:true).
-  // Store raw client coords; isOverBody() maps them to canvas pixels.
-  lastCursor = { x: e.clientX, y: e.clientY };
+  // Refresh the shared screen-coord sample; isOverBody() maps it to canvas
+  // pixels inside updateInteractivity().
+  latestCursor = { x: e.screenX, y: e.screenY };
 
   if (state.dragging) {
     // Track whether this gesture has exceeded the tap slop.
@@ -850,8 +883,40 @@ canvas.addEventListener('drop', (e) => {
   const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (!f) return;
   const p = window.pet.getPathForFile(f);
-  if (p) window.pet.openInClaude(p);
+  if (p) eatAndOpen(p, { x: e.clientX, y: e.clientY });
 });
+
+// ---- "Eat" the drop ----------------------------------------------------------
+//
+// Feedback for a successful drop: the item's glyph flies from the drop point
+// into the dog's mouth while the bark clip plays as a chomp, then the normal
+// wrap-up (walk home / rest / attentive eyes) takes over via onActivityDone.
+// The Terminal launch fires immediately — it spins up behind the animation.
+const EAT_FLY_MS = 460; // glyph flight time, drop point → mouth
+const eat = { active: false, t0: 0, from: null, glyph: '📂' };
+
+function eatAndOpen(p, from) {
+  window.pet.openInClaude(p);
+
+  // Folder vs file only picks the glyph; a dot-extension on the last path
+  // segment is a good-enough tell without a round-trip to main.
+  const base = p.split('/').pop() || '';
+  eat.glyph = /\.[^.]+$/.test(base) ? '📄' : '📂';
+  eat.active = true;
+  eat.t0 = performance.now();
+  eat.from =
+    from && from.x != null
+      ? { x: from.x, y: from.y }
+      : { x: WIN / 2, y: DOG_Y - 4 };
+
+  // Chomp (same one-off shape as the tap yip, two loops for a real swallow).
+  if (state.paused || state.dragging) return; // glyph only; don't fight a pause
+  clearTimeout(state.phaseTimer);
+  walkTarget = null;
+  returningHome = false;
+  state.activitiesLeft = 1;
+  setClip('bark', { loopTarget: 2 });
+}
 
 // ---- Menu commands from main ------------------------------------------------
 
@@ -871,9 +936,13 @@ window.pet.onMenuCommand((cmd) => {
   }
 });
 
-// Global cursor feed (screen points) → aim the resting gaze.
+// Global cursor feed (screen points) → aim the resting gaze AND re-test
+// click-through right away. The immediate call (not waiting for the next rAF)
+// is what makes the window a drop target while a file drag hovers the body:
+// drags suppress mouse events, so this poll is the only live cursor signal.
 window.pet.onCursor((p) => {
   latestCursor = { x: p.x, y: p.y };
+  updateInteractivity();
 });
 
 // ---- Claude Code status layer (section D) -----------------------------------
@@ -1033,15 +1102,13 @@ async function start() {
   state.pos = { x: wx, y: wy };
   state.home = { x: wx, y: wy };
 
-  // Seed the cursor sample so the first hover test has data. The cursor is in
-  // screen points; convert to canvas-local (client) coords by subtracting the
-  // window's top-left. Also seed the gaze cursor (screen points) directly.
+  // Seed the cursor sample (screen points) so the first hover test and gaze
+  // have data before the poll's first tick.
   try {
     const c = await window.pet.getCursor();
-    lastCursor = { x: c.x - wx, y: c.y - wy };
     latestCursor = { x: c.x, y: c.y };
   } catch (_) {
-    /* fall back to the -1 sentinels; pointermove / onCursor will populate them */
+    /* fall back to the -1 sentinel; pointermove / onCursor will populate it */
   }
 
   // Begin in REST and start the render loop.
