@@ -1,7 +1,7 @@
 {
   "kimi": {
     "apiKey": "你的 API Key：OpenRouter（sk-or- 开头，https://openrouter.ai）或 Moonshot 直连（https://platform.moonshot.cn）均可",
-    "model": "moonshotai/kimi-k2.5",
+    "model": "qwen/qwen3-235b-a22b-2507",
     "baseURL": "https://openrouter.ai/api/v1",
     "_说明": "用 Moonshot 直连时改为 model: kimi-latest, baseURL: https://api.moonshot.cn/v1"
   },
