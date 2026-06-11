@@ -42,6 +42,19 @@ const RESUME_DELAY = 600; // ms to wait after a real drag before resting again
 const REST_MIN = 6000; // min REST phase duration (ms)
 const REST_MAX = 12000; // max REST phase duration (ms)
 
+// Bond / expression unlocks. Time only counts while the user is actively
+// interacting with 多吉 (hovering over the body or dragging it around).
+const BOND_STORAGE_KEY = 'duoji.bond.v1';
+const BOND_SAVE_EVERY_MS = 3000;
+const EXPRESSION_HOLD_LOOPS = 2;
+const EXPRESSION_UNLOCKS = [
+  { clip: 'tearful', label: '泪眼汪汪', thresholdMs: 60 * 1000 },
+  { clip: 'tearful2', label: '委屈巴巴', thresholdMs: 3 * 60 * 1000 },
+  { clip: 'tearful3', label: '想贴贴', thresholdMs: 5 * 60 * 1000 },
+  { clip: 'tearful4', label: '舍不得你', thresholdMs: 8 * 60 * 1000 },
+  { clip: 'bone', label: '啃骨头', thresholdMs: 10 * 60 * 1000 },
+];
+
 // Breathing during REST: chest rises/falls, feet planted at the baseline.
 const BREATH_AMT = 0.02; // ±2% vertical scale
 const BREATH_PERIOD = 3200; // ms per breath cycle
@@ -107,6 +120,27 @@ const CLIPS = {
   scratch: { fps: 8, frames: 9, faces: 'front' },
   bark: { fps: 9, frames: 9, faces: 'front' },
   roll: { fps: 8, frames: 9, faces: 'front' },
+  bone: { fps: 8, frames: 9, faces: 'front' },
+  tearful: {
+    fps: 1,
+    frames: ['../assets/expressions/tearful.png'],
+    faces: 'front',
+  },
+  tearful2: {
+    fps: 1,
+    frames: ['../assets/expressions/tearful-2.png'],
+    faces: 'front',
+  },
+  tearful3: {
+    fps: 1,
+    frames: ['../assets/expressions/tearful-3.png'],
+    faces: 'front',
+  },
+  tearful4: {
+    fps: 1,
+    frames: ['../assets/expressions/tearful-4.png'],
+    faces: 'front',
+  },
 };
 
 // Weighted activity picks for an ACTIVE-phase burst. `walk` (the only activity
@@ -118,6 +152,7 @@ const ACTIVITY_WEIGHTS = [
   { name: 'bark', weight: 18 },
   { name: 'roll', weight: 19 },
 ];
+const EXPRESSION_WEIGHT = 10;
 
 // ---- Canvas / context setup -------------------------------------------------
 
@@ -159,9 +194,16 @@ function loadAllFrames() {
   // Numbered animation clips.
   for (const clip of Object.keys(CLIPS)) {
     images[clip] = [];
-    for (let i = 1; i <= CLIPS[clip].frames; i++) {
-      const name = String(i).padStart(2, '0') + '.png';
-      images[clip][i - 1] = loadOne(`../assets/${clip}/${name}`, tasks);
+    const frames = CLIPS[clip].frames;
+    if (Array.isArray(frames)) {
+      frames.forEach((src, i) => {
+        images[clip][i] = loadOne(src, tasks);
+      });
+    } else {
+      for (let i = 1; i <= frames; i++) {
+        const name = String(i).padStart(2, '0') + '.png';
+        images[clip][i - 1] = loadOne(`../assets/${clip}/${name}`, tasks);
+      }
     }
   }
   // REST gaze frames, keyed by direction name (images.eyes[name]).
@@ -187,6 +229,9 @@ const state = {
   phaseTimer: null, // setTimeout id ending the current REST phase
   resumeTimer: null, // setTimeout id for post-drag resume
   activitiesLeft: 0, // activities remaining in the current ACTIVE phase
+  bondMs: 0, // persisted interaction time used to unlock expressions
+  unlockedExpressions: new Set(), // clip names from EXPRESSION_UNLOCKS
+  lastBondSave: 0, // performance.now() of the last localStorage write
 };
 
 // Convenience: REST is the canonical idle, identified by the 'eyes' clip.
@@ -230,6 +275,11 @@ const claude = {
   resumeTimer: null, // setTimeout id resuming the scheduler after the last task
 };
 
+const unlockNotice = {
+  until: 0,
+  label: '',
+};
+
 // True while a file/folder is being dragged over the dog (section E): show a
 // 📂 glyph and a tiny scale-up cue inviting the drop.
 let dropHover = false;
@@ -253,14 +303,102 @@ let pendingMove = null; // throttled {x,y} window move, applied in the rAF loop
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const frameCount = (clip) =>
+  Array.isArray(CLIPS[clip].frames)
+    ? CLIPS[clip].frames.length
+    : CLIPS[clip].frames;
+
+function unlockedExpressionWeights() {
+  return EXPRESSION_UNLOCKS.filter((e) =>
+    state.unlockedExpressions.has(e.clip)
+  ).map((e) => ({ name: e.clip, weight: EXPRESSION_WEIGHT }));
+}
 
 function pickActivity() {
-  const total = ACTIVITY_WEIGHTS.reduce((s, b) => s + b.weight, 0);
+  const weights = [...ACTIVITY_WEIGHTS, ...unlockedExpressionWeights()];
+  const total = weights.reduce((s, b) => s + b.weight, 0);
   let r = Math.random() * total;
-  for (const b of ACTIVITY_WEIGHTS) {
+  for (const b of weights) {
     if ((r -= b.weight) < 0) return b.name;
   }
   return 'scratch';
+}
+
+function loadBondState() {
+  try {
+    const raw = localStorage.getItem(BOND_STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    state.bondMs = Math.max(0, Number(saved.bondMs) || 0);
+    const unlocked = Array.isArray(saved.unlocked) ? saved.unlocked : [];
+    state.unlockedExpressions = new Set(
+      unlocked.filter((clip) => EXPRESSION_UNLOCKS.some((e) => e.clip === clip))
+    );
+    // If thresholds were lowered in an update, honor the already-earned time.
+    for (const e of EXPRESSION_UNLOCKS) {
+      if (state.bondMs >= e.thresholdMs) state.unlockedExpressions.add(e.clip);
+    }
+  } catch (_) {
+    state.bondMs = 0;
+    state.unlockedExpressions = new Set();
+  }
+}
+
+function saveBondState(now = performance.now(), force = false) {
+  if (!force && now - state.lastBondSave < BOND_SAVE_EVERY_MS) return;
+  state.lastBondSave = now;
+  try {
+    localStorage.setItem(
+      BOND_STORAGE_KEY,
+      JSON.stringify({
+        bondMs: Math.floor(state.bondMs),
+        unlocked: [...state.unlockedExpressions],
+      })
+    );
+  } catch (_) {
+    /* storage can fail in odd embed modes; unlocks still work for this run */
+  }
+}
+
+function playExpression(clip) {
+  clearTimeout(state.phaseTimer);
+  walkTarget = null;
+  returningHome = false;
+  state.activitiesLeft = 1;
+  setClip(clip, { loopTarget: EXPRESSION_HOLD_LOOPS });
+}
+
+function unlockExpression(e, now) {
+  state.unlockedExpressions.add(e.clip);
+  saveBondState(now, true);
+  unlockNotice.label = '解锁：' + e.label;
+  unlockNotice.until = now + DONE_FLASH_MS;
+  if (!state.paused && !state.dragging && !claudeHolding()) {
+    playExpression(e.clip);
+  }
+}
+
+function cursorOverDog() {
+  if (latestCursor.x < 0) return false;
+  return isOverBody(
+    latestCursor.x - state.pos.x,
+    latestCursor.y - state.pos.y
+  );
+}
+
+function tickBond(dt, now) {
+  if (!(state.dragging || cursorOverDog())) return;
+  state.bondMs += dt * 1000;
+  for (const e of EXPRESSION_UNLOCKS) {
+    if (
+      state.bondMs >= e.thresholdMs &&
+      !state.unlockedExpressions.has(e.clip)
+    ) {
+      unlockExpression(e, now);
+      break;
+    }
+  }
+  saveBondState(now);
 }
 
 // Choose the gaze frame NAME by matching the dog→cursor vector to the closest
@@ -316,10 +454,7 @@ function updateInteractivity() {
   if (state.dragging) return; // never toggle ignore mid-drag
   if (osDragActive) return; // main owns the ignore state during system drags
   if (latestCursor.x < 0) return; // no cursor sample yet
-  const over = isOverBody(
-    latestCursor.x - state.pos.x,
-    latestCursor.y - state.pos.y
-  );
+  const over = cursorOverDog();
   if (over !== currentlyInteractive) {
     currentlyInteractive = over;
     window.pet.setIgnore(!over); // interactive = NOT ignoring mouse
@@ -332,6 +467,8 @@ function updateInteractivity() {
 function drawClipFrame() {
   const img = images[state.clipName][state.frame];
   if (!img || !img.complete || img.naturalWidth === 0) return;
+  const clip = CLIPS[state.clipName] || {};
+  const src = clip.src || SRC;
   ctx.save();
   if (state.facingRight) {
     // Bake the horizontal flip into the canvas so the hit-test stays accurate.
@@ -340,7 +477,7 @@ function drawClipFrame() {
   }
   // Uniform anchoring: every clip shares the 420px baseline, so a straight
   // 420→DOG scale keeps the dog grounded with no vertical "jump" between poses.
-  ctx.drawImage(img, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
+  ctx.drawImage(img, 0, 0, src, src, DOG_X, DOG_Y, DOG, DOG);
   ctx.restore();
 }
 
@@ -508,7 +645,15 @@ function drawOverlay(now) {
   let mode = null;
   let label = '';
   let suffix = '';
-  if (now < claude.doneUntil) {
+  if (now < unlockNotice.until) {
+    mode = 'done';
+    label = unlockNotice.label;
+    chipAlpha = 1;
+  } else if (now < unlockNotice.until + CHIP_FADE_MS) {
+    mode = 'done';
+    label = unlockNotice.label;
+    chipAlpha = 1 - (now - unlockNotice.until) / CHIP_FADE_MS;
+  } else if (now < claude.doneUntil) {
     mode = 'done';
     label = claude.doneLabel;
     chipAlpha = 1;
@@ -586,7 +731,9 @@ function loop(now) {
   // 4) Draw, then re-test click-through against the (possibly moved) sprite.
   drawFrame(now, dt);
   updateInteractivity();
-  // 5) Chip overlay last, so it never participates in the hit-test above.
+  // 5) Count active interaction toward expression unlocks.
+  tickBond(dt, now);
+  // 6) Chip overlay last, so it never participates in the hit-test above.
   drawOverlay(now);
 
   requestAnimationFrame(loop);
@@ -599,7 +746,7 @@ function advanceAnimation(dt) {
   while (state._frameAcc >= frameDur) {
     state._frameAcc -= frameDur;
     state.frame++;
-    if (state.frame >= clip.frames) {
+    if (state.frame >= frameCount(state.clipName)) {
       state.frame = 0;
       state.loops++;
       // In-place clips (scratch/bark/roll) end the activity once they've played
@@ -681,8 +828,15 @@ function runNextActivity() {
   if (choice === 'walk') {
     startWalk();
   } else {
-    // scratch / bark / roll: play in place for 1–2 loops, then onActivityDone.
-    setClip(choice, { loopTarget: Math.random() < 0.5 ? 1 : 2 });
+    // In-place clips: play briefly, then onActivityDone.
+    const isExpression = EXPRESSION_UNLOCKS.some((e) => e.clip === choice);
+    setClip(choice, {
+      loopTarget: isExpression
+        ? EXPRESSION_HOLD_LOOPS
+        : Math.random() < 0.5
+          ? 1
+          : 2,
+    });
   }
 }
 
@@ -1124,6 +1278,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
 
 async function start() {
   await loadAllFrames();
+  loadBondState();
 
   // Seed local position from the real window position; that spot is home.
   const [wx, wy] = await window.pet.getPos();
