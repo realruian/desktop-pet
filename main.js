@@ -164,9 +164,16 @@ ipcMain.on('set-ignore', (_e, ignore) => {
 });
 
 // Move the window's top-left corner (screen points). Used for both dragging
-// and the wander AI.
+// and the wander AI. A non-finite coordinate must never take the app down
+// (seen once in the wild as a setPosition conversion-failure dialog) — drop
+// the frame instead; the renderer self-heals by resyncing from the window.
 ipcMain.on('move-to', (_e, { x, y }) => {
-  if (win) win.setPosition(Math.round(x), Math.round(y));
+  if (!win) return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    console.log('[move-to] dropped non-finite coords: ' + x + ',' + y);
+    return;
+  }
+  win.setPosition(Math.round(x), Math.round(y));
 });
 
 // Current window top-left → [x, y].

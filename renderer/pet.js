@@ -303,6 +303,26 @@ let pendingMove = null; // throttled {x,y} window move, applied in the rAF loop
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+
+// Self-heal for corrupted coordinates (display changes / sleep-wake edges can
+// leave a NaN in flight): forget any in-progress motion, resync the position
+// from the real window, and settle back into REST. Main independently drops
+// non-finite move-to frames, so the dog can stutter but never crash.
+async function recoverPosition(reason) {
+  console.warn('[pet] non-finite position (' + reason + '); resyncing');
+  walkTarget = null;
+  returningHome = false;
+  pendingMove = null;
+  try {
+    const [wx, wy] = await window.pet.getPos();
+    state.pos = { x: wx, y: wy };
+    if (!finitePt(state.home)) state.home = { x: wx, y: wy };
+  } catch (_) {
+    /* keep the last sane values; the next frame retries nothing */
+  }
+  if (!state.paused && !state.dragging) enterRest();
+}
 const frameCount = (clip) =>
   Array.isArray(CLIPS[clip].frames)
     ? CLIPS[clip].frames.length
@@ -715,10 +735,14 @@ function loop(now) {
 
   // 1) Apply any throttled drag move (1:1 with the cursor).
   if (pendingMove) {
-    window.pet.moveTo(pendingMove.x, pendingMove.y);
-    state.pos.x = pendingMove.x;
-    state.pos.y = pendingMove.y;
-    pendingMove = null;
+    if (finitePt(pendingMove)) {
+      window.pet.moveTo(pendingMove.x, pendingMove.y);
+      state.pos.x = pendingMove.x;
+      state.pos.y = pendingMove.y;
+      pendingMove = null;
+    } else {
+      recoverPosition('drag move');
+    }
   }
 
   // 2) Advance the current clip by elapsed time vs its fps (REST is gaze-driven,
@@ -764,6 +788,10 @@ function advanceAnimation(dt) {
 
 function stepWalk(dt) {
   const to = walkTarget;
+  if (!finitePt(state.pos) || !finitePt(to)) {
+    recoverPosition('walk step');
+    return;
+  }
   const d = dist(state.pos, to);
   if (d <= 3) {
     // Snap to target and end this activity.
@@ -897,6 +925,10 @@ function startWalk() {
     const tx = home.x + dir * rand(Math.min(STROLL_MIN, span), span);
     const ty = clamp(home.y, minY, maxY); // stay on home's level
 
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) {
+      recoverPosition('stroll target');
+      return;
+    }
     state.facingRight = tx > state.pos.x;
     walkTarget = { x: tx, y: ty };
     setClip('walk'); // looped; arrival at target ends it
