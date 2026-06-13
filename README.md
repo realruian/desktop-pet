@@ -33,6 +33,7 @@
 | 💬 **和多吉聊天（Kimi）** | **双击狗身**或右键 → 💬 聊天，弹出贴在它头顶的聊天小卡片。多吉人设、中文短句、偶尔「汪！」；历史在会话内保留。接口兼容 OpenRouter / Moonshot 直连 |
 | 🎤 **跟它说话（语音输入）** | 聊天卡片里按一下 🎤 开始说话、再按一下结束：录音在本地转成 16kHz WAV → 音频模型**逐字转写**（带「多吉」热词，名字不会听岔）→ 转写文本自动作为消息发出 → 多吉用文字气泡回复。首次使用 macOS 会弹一次麦克风授权 |
 | ⌨️ **全局长按说话（⌥Space）** | 在**任何应用里**按住 `Option+Space`：聊天窗瞬间弹出开始录音（提示「多吉在听…松开按键自动发送」），**松手即停**、自动转写发送。再按一次快捷键或点 ■ 也能结束；快捷键可在 `config.json` 的 `hotkey.ptt` 改 |
+| 🎙 **喊「多吉多吉」免按键唤醒** | 麦克风常驻**本地离线**监听唤醒词，喊一声「多吉多吉」→ 柯基汪一声、聊天窗自动弹出开始聆听 → 你把问题说完、停顿一下就**自动转写发送**（语音活动检测，无需按键）。唤醒词识别全程在本机用 sherpa-onnx 完成，**不联网、不耗 API、不上传音频**；右键菜单「🎙 语音唤醒」可随时开关，灵敏度在 `config.json` 的 `wake.threshold` 调。开启时菜单栏会常亮系统的橙色麦克风点（macOS 对常驻收音的标记） |
 | 📓 **用你的 Obsidian 笔记回答** | 在 `config.json` 填上库路径后，每次提问它会**本地检索**你的笔记（中文双字匹配 + 标题加权），把最相关的几段作为参考来回答，并自然提到出自哪篇笔记；没翻到就老实说。纯本地文件扫描，笔记内容只随这一次提问发给模型 |
 | 🫥 **像素级点击穿透** | 只有身体不透明像素能被点中，透明区域的点击直接穿透到下面的应用 |
 | 📌 **悬浮于一切之上** | `screen-saver` 窗口层级 + 跨空间可见，普通应用、浮动面板、全屏 app 都压不住它 |
@@ -51,6 +52,7 @@
 - **Obsidian 检索**：轻量本地 RAG——把问题切成中文双字组合 + 英文词，扫描库内全部 `.md`（跳过 `.obsidian`/Excalidraw，单文件 ≤200KB，上限 4000 篇），按命中数打分（标题命中 ×4 加权），取最相关 4 篇、每篇截取命中处约 420 字，作为 system 参考消息随问题发出。五百篇规模检索耗时 <1 秒，全程不联网（除发给模型那一步）。
 - **语音输入**：渲染层 `MediaRecorder` 录 webm/opus → `decodeAudioData` + `OfflineAudioContext` 重采样为 16kHz 单声道 → 手写 WAV 编码 → base64 交主进程 → 以 `input_audio` 调同一 OpenRouter Key 下的音频模型（默认 `google/gemini-2.5-flash`，`config.json` 的 `stt.model` 可换）逐字转写 → 转写文本走正常聊天链路。单次录音上限 1 分钟；麦克风权限由主进程 `askForMediaAccess` 申请。
 - **全局长按说话**：Electron 的全局快捷键只有「按下」没有「松开」事件，所以按下由 `globalShortcut` 触发（弹出聊天窗并开录），「松手」由获得焦点的聊天窗监听 keyup 结束；兜底：再按一次快捷键、点 ■、或 60 秒上限。聊天窗启动时预创建（隐藏），保证弹出零等待。
+- **语音唤醒（喊「多吉多吉」）**：一个隐藏的「监听窗」用 Web Audio 采麦克风、降到 16kHz 单声道，把音频帧串流给主进程；主进程用 **sherpa-onnx**（`sherpa-onnx-node` + WenetSpeech 中文 KWS 模型，约 5.5MB，放在 `assets/kws/`）做离线关键词检测——纯本地、无网络、无 API。命中后柯基汪一声、弹出聊天窗并进入「语音活动检测（VAD）」录音：检测到你开口、再检测到约 1.2 秒静音就自动停并转写发送。唤醒期间监听暂停（避免听到你自己的问题反复触发）。Web Audio 在无用户手势的隐藏窗里需要 `autoplay-policy=no-user-gesture-required` 才会跑。打包要点：原生 `.node` 及其 `.dylib`、模型文件必须解包出 asar（`build/pack.js` 里 `asar.unpack`/`unpackDir`），且 `.node` 与 dylib 要留在同一目录靠 `@loader_path` rpath 解析（无需 `install_name_tool`）。缺原生模块或模型文件时自动降级为「无唤醒」，不影响其它功能。
 
 ## 技术栈
 
@@ -87,6 +89,8 @@ npm start        # 启动桌宠（等价于 electron .）
 
 **开启笔记问答**：在 `config.json` 的 `obsidian.vault` 填上你的 Obsidian 库路径即可（vault 列表可在 `~/Library/Application Support/obsidian/obsidian.json` 查到）。
 
+**语音唤醒（喊「多吉多吉」）**：默认开启，喊一声就能免按键唤起对话。需要麦克风权限（首次会弹一次授权）；不想要常驻收音就右键 →「🎙 语音唤醒」关掉，或把 `config.json` 的 `wake.enabled` 设为 `false`。识别全程本地离线，音频不出本机。
+
 > ⚠️ 首次用「拖文件起终端」会弹两个 macOS 权限，各点一次「允许」即可：
 > 1. **自动化**：允许 多吉（开发版 `npm start` 下显示为 Electron）控制 Terminal——打开终端需要。这个弹窗没点的话 AppleEvent 会一直等到超时，看起来像「拖了没反应」，其实是授权框还停在屏幕上。
 > 2. **辅助功能**：允许 多吉 / Electron（仅用于把 `@文件名` 预填进去，不给也能打开终端、只是不预填）。
@@ -96,17 +100,23 @@ npm start        # 启动桌宠（等价于 electron .）
 ## 目录结构
 
 ```
-main.js                 主进程：透明窗口 / IPC / 右键菜单 / 光标轮询 / Claude hook 监听 / 拖文件起终端 / Kimi 聊天
+main.js                 主进程：透明窗口 / IPC / 右键菜单 / 光标轮询 / Claude hook 监听 / 拖文件起终端 / Kimi 聊天 / 语音唤醒
+kws.js                  语音唤醒引擎（主进程侧，封装 sherpa-onnx KeywordSpotter）
 preload.js              桌宠窗口的安全 IPC 桥（暴露 window.pet.*）
 preload-chat.js         聊天窗口的安全 IPC 桥（暴露 window.chat.*）
-build/                  打包资源：icon.icns（像素狗头图标）、extend.plist（麦克风等权限声明）、make-icon.py
+preload-catcher.js      拖放接驳窗的 IPC 桥
+preload-listener.js     语音监听窗的 IPC 桥
+build/                  打包资源：icon.icns（像素狗头图标）、extend.plist（麦克风等权限声明）、make-icon.py、pack.js（打包脚本）
 renderer/
   index.html            铺满窗口的单个 <canvas>
   style.css             透明、像素渲染
   pet.js                动画引擎 + 行为状态机 + 拖动/穿透 + 眼睛跟随 + Claude 状态胶囊 + 拖放
-  chat.html/css/js      聊天面板（气泡列表 + 输入框）
-config.example.json     Kimi 配置模板（复制为 config.json 填 Key；config.json 不入库）
+  chat.html/css/js      聊天面板（气泡列表 + 输入框 + 语音/VAD）
+  catcher.html/js       隐形拖放接驳窗
+  listener.html/js      隐形语音监听窗（采麦克风 → 16k PCM 串流给主进程）
+config.example.json     配置模板（复制为 config.json 填 Key；config.json 不入库）
 assets/{walk,scratch,bark,roll,eyes}/   App 实际加载的归一化帧（420 画布、同一地面基线）
+assets/kws/             离线语音唤醒模型（WenetSpeech 中文 KWS，约 5.5MB）+ keywords.txt（多吉多吉）
 .claude/settings.json   把 Claude Code hooks 转发给桌宠
 SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
 主图.png                 展示用主图
@@ -116,7 +126,7 @@ SPEC.md / SPEC2.md      v1 与 v2 的完整实现规格
 
 ## 当前状态
 
-可用（v7）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（全机多会话、任务名、完成 ✅+汪 + 系统通知）、拖文件/文件夹起终端、和多吉聊天（双击狗身，Kimi）、语音说话（🎤 / 全局 ⌥Space 长按）、Obsidian 笔记问答、**独立 .app 打包（像素狗头图标、开机自启、单实例）**。
+可用（v8）。已实现：休息 + 呼吸、眼睛跟随鼠标、像素级点击穿透、1:1 拖动、家附近横向溜达 + 自动回家、悬浮于一切应用之上、Claude Code 状态胶囊（全机多会话、任务名、完成 ✅+汪 + 系统通知）、拖文件/文件夹起终端（吃进去动画）、和多吉聊天（双击狗身）、语音说话（🎤 / 全局 ⌥Space 长按）、**喊「多吉多吉」离线语音唤醒**、Obsidian 笔记问答、**独立 .app 打包（像素狗头图标、开机自启、单实例）**。
 
 常用调参见 `renderer/pet.js` 顶部（`WIN` / `DOG` / `WANDER` / `HOME_RANGE` / `STROLL_MIN` / `WALK_SPEED` / `REST_MIN/MAX` / `BREATH_*` / `GAZE_*` / `CHIP_*` / `PROG_*` / `ACTIVITY_WEIGHTS`）与 `main.js` 顶部（`CLAUDE_PORT` / `CURSOR_POLL_MS` / `CHAT_W/H` / `PERSONA` / `VAULT_*`）。完整设计见 [SPEC.md](SPEC.md)（v1）与 [SPEC2.md](SPEC2.md)（v2）。
 

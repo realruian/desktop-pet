@@ -139,6 +139,13 @@ async function toggleRecording() {
 async function onRecordingStop() {
   clearTimeout(recTimer);
   pttActive = false;
+  // Wake-listen teardown: stop the VAD monitor and let main resume listening
+  // for the next "多吉多吉". A silent no-speech timeout finishes quietly (no
+  // error bubble) — the user said the wake word but then nothing.
+  const wasWake = wakeActive;
+  wakeActive = false;
+  stopVAD();
+  if (wasWake) window.chat.wakeDone();
   micEl.classList.remove('recording');
   micEl.textContent = '🎤';
   inputEl.placeholder = PLACEHOLDER_IDLE;
@@ -147,7 +154,7 @@ async function onRecordingStop() {
   const blob = new Blob(recChunks, { type: 'audio/webm' });
   rec = null;
   if (blob.size < 1500) {
-    addBubble('error', '没录到声音，再试一次？');
+    if (!wasWake) addBubble('error', '没录到声音，再试一次？');
     return;
   }
   const typing = addTyping(); // "听写中" dots
@@ -237,6 +244,97 @@ window.chat.onPTT(() => {
 window.addEventListener('keyup', () => {
   if (pttActive && rec) rec.stop();
 });
+
+// ---- Wake word "多吉多吉" → voice-activity auto-send (section H) -------------
+//
+// After main detects the wake phrase it pops the panel and fires this. There's
+// no key to release, so we record with a simple energy-based VAD: once the
+// user starts talking, ~1.2s of trailing silence ends and auto-sends the
+// question; if nothing is said within a few seconds we bail quietly.
+const WAKE_SILENCE_MS = 1200; // trailing silence that ends the utterance
+const WAKE_NOSPEECH_MS = 4000; // give up if the user says nothing
+const WAKE_MAX_MS = 12000; // hard cap on a single question
+const WAKE_RMS_GATE = 0.018; // speech-vs-silence energy threshold
+const PLACEHOLDER_WAKE = '多吉在听…说完自动发送';
+let wakeActive = false;
+let vad = null; // { timer, ctx } while a VAD monitor runs
+
+window.chat.onWakeListen(() => {
+  if (rec) return; // already recording (manual / PTT) — ignore the trigger
+  wakeActive = true;
+  startWakeRecording();
+});
+
+async function startWakeRecording() {
+  try {
+    await window.chat.ensureMic();
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (_) {
+    wakeActive = false;
+    window.chat.wakeDone();
+    addBubble(
+      'error',
+      '用不了麦克风：去 系统设置 → 隐私与安全性 → 麦克风，允许本应用后再试。'
+    );
+    return;
+  }
+  recChunks = [];
+  rec = new MediaRecorder(recStream, { mimeType: 'audio/webm' });
+  rec.ondataavailable = (e) => recChunks.push(e.data);
+  rec.onstop = onRecordingStop;
+  rec.start();
+  micEl.classList.add('recording');
+  micEl.textContent = '■';
+  inputEl.placeholder = PLACEHOLDER_WAKE;
+  recTimer = setTimeout(() => rec && rec.stop(), WAKE_MAX_MS);
+  startVAD(recStream);
+}
+
+function startVAD(stream) {
+  let ctx;
+  try {
+    ctx = new AudioContext();
+  } catch (_) {
+    return; // no VAD; the WAKE_MAX_MS cap still ends the recording
+  }
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const buf = new Float32Array(an.fftSize);
+  const t0 = performance.now();
+  let speechStarted = false;
+  let lastLoud = t0;
+  const timer = setInterval(() => {
+    if (!rec || !wakeActive) return;
+    an.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const now = performance.now();
+    if (rms > WAKE_RMS_GATE) {
+      lastLoud = now;
+      if (!speechStarted && now - t0 > 150) speechStarted = true;
+    }
+    if (speechStarted && now - lastLoud > WAKE_SILENCE_MS) {
+      rec.stop(); // → onRecordingStop → transcribe + send
+    } else if (!speechStarted && now - t0 > WAKE_NOSPEECH_MS) {
+      rec.stop(); // silent timeout: onRecordingStop finishes quietly
+    }
+  }, 80);
+  vad = { timer, ctx };
+}
+
+function stopVAD() {
+  if (!vad) return;
+  clearInterval(vad.timer);
+  try {
+    vad.ctx.close();
+  } catch (_) {
+    /* already closed */
+  }
+  vad = null;
+}
 
 sendEl.addEventListener('click', () => sendMessage());
 inputEl.addEventListener('input', autosize);

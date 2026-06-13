@@ -24,6 +24,12 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
+// The hidden wake-word listener processes mic audio via Web Audio with no user
+// gesture; without this, Chromium's autoplay policy can leave its AudioContext
+// suspended so no frames flow. Capture (getUserMedia) is unaffected, but the
+// processing graph needs this to run gesture-free.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 // Window is a WIN×WIN square; the canvas inside is drawn at this size.
 const WIN = 160;
 
@@ -202,6 +208,12 @@ ipcMain.on('show-menu', () => {
         win.webContents.send('menu-command', 'toggle-pause');
       },
     },
+    {
+      label: '🎙 语音唤醒（喊「多吉多吉」）',
+      type: 'checkbox',
+      checked: wakeOn,
+      click: (item) => setWakeEnabled(item.checked, true),
+    },
     // Login-item control only makes sense for the packaged .app (in dev it
     // would register the bare Electron binary).
     ...(app.isPackaged
@@ -307,6 +319,7 @@ function loadKimiConfig() {
   let obsidian = {};
   let stt = {};
   let hotkey = {};
+  let wake = {};
   for (const p of CONFIG_PATHS) {
     try {
       const raw = fs.readFileSync(p, 'utf8');
@@ -315,11 +328,17 @@ function loadKimiConfig() {
       obsidian = parsed.obsidian || {};
       stt = parsed.stt || {};
       hotkey = parsed.hotkey || {};
+      wake = parsed.wake || {};
       break; // first existing config wins (userData, then repo checkout)
     } catch (_) {
       /* try the next location; none → env/defaults */
     }
   }
+  // wake.enabled defaults to true (the user asked for always-on wake); env
+  // PET_WAKE=0/1 overrides for tests.
+  let wakeEnabled = wake.enabled !== false;
+  if (process.env.PET_WAKE === '0') wakeEnabled = false;
+  if (process.env.PET_WAKE === '1') wakeEnabled = true;
   return {
     apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
     baseURL:
@@ -331,7 +350,45 @@ function loadKimiConfig() {
     sttModel:
       process.env.PET_STT_MODEL || stt.model || 'google/gemini-2.5-flash',
     pttHotkey: process.env.PET_PTT_HOTKEY || hotkey.ptt || 'Alt+Space',
+    wakeEnabled,
+    wakeThreshold:
+      Number(process.env.PET_WAKE_THRESHOLD) || wake.threshold || 0.2,
+    wakeScore: Number(process.env.PET_WAKE_SCORE) || wake.score || 2.0,
   };
+}
+
+// Persist a partial config change back to the user config file (creating it in
+// userData if needed), preserving everything else. Used by the menu's wake
+// toggle so the choice survives restarts.
+function patchConfig(section, patch) {
+  const target = CONFIG_PATHS[0]; // userData/config.json — the writable home
+  let parsed = {};
+  for (const p of CONFIG_PATHS) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(p, 'utf8')) || {};
+      break;
+    } catch (_) {
+      /* none yet */
+    }
+  }
+  parsed[section] = Object.assign({}, parsed[section], patch);
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
+  } catch (err) {
+    console.log('[cfg] could not persist ' + section + ': ' + err.message);
+  }
+}
+
+// Resolve a bundled resource directory to a REAL filesystem path. Inside a
+// packaged app, files referenced by the native KWS reader can't live in the
+// asar archive, so they're unpacked — map app.asar → app.asar.unpacked.
+function resourcePath(...parts) {
+  let base = __dirname;
+  if (base.includes('app.asar' + path.sep) || base.endsWith('app.asar')) {
+    base = base.replace('app.asar', 'app.asar.unpacked');
+  }
+  return path.join(base, ...parts);
 }
 
 // ---- Obsidian retrieval (section F) -----------------------------------------
@@ -933,6 +990,123 @@ ipcMain.on('catcher-drop', (_e, p) => {
   if (dropCatcher) dropCatcher.hide();
 });
 
+// ---- Wake word "多吉多吉" (section H) ----------------------------------------
+//
+// A hidden listener window captures the mic and streams 16 kHz mono PCM here;
+// the sherpa-onnx engine (kws.js) spots the wake phrase fully on-device. On a
+// hit we bark, pop the chat panel, and have it record the follow-up question
+// with voice-activity auto-send. Capture pauses for that question so the engine
+// never hears (and re-triggers on) the user's own speech.
+const { WakeEngine } = require('./kws');
+let listenerWin = null;
+let wakeEngine = null;
+let wakeOn = false; // current enabled state (menu/config)
+let wakeConversation = false; // a wake-triggered Q&A is in progress
+
+function createListenerWindow() {
+  listenerWin = new BrowserWindow({
+    width: 1,
+    height: 1,
+    show: false,
+    frame: false,
+    transparent: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    focusable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-listener.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  listenerWin.loadFile(path.join(__dirname, 'renderer', 'listener.html'));
+  // Start capture once the page is live (if wake is enabled). Sending before
+  // load would be dropped; startWakeEngine also sends for the runtime toggle.
+  listenerWin.webContents.on('did-finish-load', () => {
+    if (wakeOn && listenerWin) listenerWin.webContents.send('wake-start');
+  });
+  listenerWin.on('closed', () => {
+    listenerWin = null;
+  });
+}
+
+// Listener → main: one 16 kHz mono float32 frame. Ignored while a wake
+// conversation is in flight (capture is paused renderer-side too).
+ipcMain.on('wake-audio', (_e, frame) => {
+  if (!wakeEngine || wakeConversation) return;
+  let samples = frame;
+  if (!(frame instanceof Float32Array)) {
+    try {
+      samples = new Float32Array(
+        frame.buffer || frame,
+        frame.byteOffset || 0,
+        frame.byteLength ? frame.byteLength / 4 : undefined
+      );
+    } catch (_) {
+      return;
+    }
+  }
+  wakeEngine.feed(samples);
+});
+
+ipcMain.on('wake-ready', (_e, info) => {
+  console.log(
+    '[kws] mic capture ' +
+      (info && info.ok ? 'started' : 'FAILED: ' + (info && info.reason))
+  );
+});
+
+// Chat renderer signals the wake-triggered question is finished recording →
+// resume listening for the next "多吉多吉".
+ipcMain.on('wake-done', () => {
+  wakeConversation = false;
+  if (wakeOn && listenerWin) listenerWin.webContents.send('wake-pause', false);
+});
+
+function onWakeDetected() {
+  if (wakeConversation) return;
+  wakeConversation = true;
+  if (listenerWin) listenerWin.webContents.send('wake-pause', true);
+  if (win) win.webContents.send('wake-bark');
+  openChat();
+  if (chatWin) chatWin.webContents.send('wake-listen');
+}
+
+function startWakeEngine() {
+  const { wakeThreshold, wakeScore } = loadKimiConfig();
+  wakeEngine = new WakeEngine({
+    modelDir: resourcePath('assets', 'kws'),
+    keywordsFile: resourcePath('assets', 'kws', 'keywords.txt'),
+    threshold: wakeThreshold,
+    score: wakeScore,
+    onWake: onWakeDetected,
+    log: (m) => console.log(m),
+  });
+  if (!wakeEngine.start()) {
+    wakeEngine = null;
+    return false;
+  }
+  if (listenerWin) listenerWin.webContents.send('wake-start');
+  return true;
+}
+
+function stopWakeEngine() {
+  if (listenerWin) listenerWin.webContents.send('wake-stop');
+  if (wakeEngine) wakeEngine.stop();
+  wakeEngine = null;
+  wakeConversation = false;
+}
+
+// Flip wake listening on/off; `persist` writes the choice to config.json.
+function setWakeEnabled(on, persist) {
+  wakeOn = !!on;
+  if (wakeOn) startWakeEngine();
+  else stopWakeEngine();
+  if (persist) patchConfig('wake', { enabled: wakeOn });
+  console.log('[kws] wake ' + (wakeOn ? 'enabled' : 'disabled'));
+}
+
 // ---- Dev-only test bridge (PET_TEST_PORT) ------------------------------------
 //
 // A tiny loopback eval/capture server used by automated tests to drive the real
@@ -1029,6 +1203,12 @@ app.whenReady().then(() => {
   // Pre-create the (hidden) chat window so push-to-talk pops it instantly.
   createChatWindow();
 
+  // Wake word (section H): hidden listener + offline spotter. Honors the
+  // saved on/off; defaults on (the user asked for always-on "多吉多吉").
+  createListenerWindow();
+  const { wakeEnabled } = loadKimiConfig();
+  setWakeEnabled(wakeEnabled, false);
+
   // Push-to-talk (section G): a GLOBAL hotkey — hold to record from anywhere.
   // Electron only reports key-DOWN for global shortcuts, so the release is
   // detected by the (now focused) chat renderer via keyup; pressing the hotkey
@@ -1063,6 +1243,7 @@ app.on('before-quit', () => {
 // Tear down the hook server on quit so the port is released cleanly.
 app.on('will-quit', () => {
   if (dragWatcher) dragWatcher.kill();
+  stopWakeEngine();
   globalShortcut.unregisterAll();
   if (claudeServer) {
     try {

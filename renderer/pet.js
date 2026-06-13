@@ -1159,6 +1159,18 @@ window.pet.onDropPath((p) => {
   eatAndOpen(p);
 });
 
+// Wake word "多吉多吉" heard (section H): a single attentive bark, same one-off
+// shape as the tap yip. The chat panel pops separately; this is just the dog
+// perking up to say "I'm listening".
+window.pet.onWakeBark(() => {
+  if (state.paused || state.dragging) return;
+  clearTimeout(state.phaseTimer);
+  walkTarget = null;
+  returningHome = false;
+  state.activitiesLeft = 1;
+  setClip('bark', { loopTarget: 1 });
+});
+
 // ---- Claude Code status layer (section D) -----------------------------------
 //
 // Maps forwarded hook events (from EVERY Claude Code session on the machine —

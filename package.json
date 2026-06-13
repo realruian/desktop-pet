@@ -5,11 +5,14 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-packager . 多吉 --platform=darwin --arch=arm64 --out=dist --overwrite --asar --app-bundle-id=com.simin.duoji --extend-info=build/extend.plist --ignore='^/像素狗狗动作帧' --ignore='^/dist' --ignore='^/build' --ignore='^/SPEC' --ignore='^/\\.claude' --ignore='\\.py$' --ignore='^/主图' --ignore='^/README' --ignore='_run' --ignore='^/config\\.json$' --ignore='^/\\.gitignore' --ignore='^/_' && cp build/icon.icns 'dist/多吉-darwin-arm64/多吉.app/Contents/Resources/electron.icns' && touch 'dist/多吉-darwin-arm64/多吉.app'"
+    "pack": "node build/pack.js"
   },
   "license": "MIT",
   "devDependencies": {
     "@electron/packager": "^20.0.1",
     "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "^1.13.2"
   }
 }

@@ -8,6 +8,8 @@ build/icon.iconset/
 # ── 本地杂项备份 ─────────────────────────────────────────────
 _asset_repair_backup_*/
 _qa_contact_sheets/
+# 唤醒词可行性验证的临时目录（下载的完整模型 + TTS 样本，约 90MB）
+_kws_spike/
 
 # ── PyInstaller / 像素动画生成实验的运行输出（体积大、与本项目无关）──
 *_run/

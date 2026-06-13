@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'"
+    />
+  </head>
+  <body>
+    <!-- Invisible window: captures the mic for offline wake-word spotting and
+         streams 16 kHz mono PCM to the main process (section H). No UI. -->
+    <script src="listener.js"></script>
+  </body>
+</html>

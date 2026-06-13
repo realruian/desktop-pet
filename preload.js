@@ -38,4 +38,6 @@ contextBridge.exposeInMainWorld('pet', {
   onDropHover: (cb) => ipcRenderer.on('drop-hover', (_e, on) => cb(on)),
   // Relayed from the catcher: a file/folder was dropped on the dog.
   onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
+  // Wake word heard (section H): bark + perk up as acknowledgement.
+  onWakeBark: (cb) => ipcRenderer.on('wake-bark', () => cb()),
 });
