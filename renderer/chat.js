@@ -259,9 +259,26 @@ const PLACEHOLDER_WAKE = '多吉在听…说完自动发送';
 let wakeActive = false;
 let vad = null; // { timer, ctx } while a VAD monitor runs
 
+// A random little greeting the dog pops the moment it's woken — pure flavor,
+// shown as a display-only bubble (NOT pushed to history, so it never muddles
+// the actual question→answer the model sees).
+const WAKE_GREETINGS = [
+  '主人，你终于想起我了！',
+  '汪！我在我在，说吧～',
+  '主人找我啦？耳朵都竖起来咯！',
+  '哎，等你好久啦～说说看？',
+  '汪汪！这就来，听着呢～',
+  '雷达一直给你开着呢，请讲！',
+  '是不是想我了？嘿嘿，说吧～',
+  '主人召唤，多吉到！',
+];
+
 window.chat.onWakeListen(() => {
   if (rec) return; // already recording (manual / PTT) — ignore the trigger
   wakeActive = true;
+  // Bark fires first (pet window); let it lead, then pop the greeting bubble.
+  const greeting = WAKE_GREETINGS[Math.floor(Math.random() * WAKE_GREETINGS.length)];
+  setTimeout(() => addBubble('dog', greeting), 400);
   startWakeRecording();
 });
 
