@@ -40,4 +40,10 @@ contextBridge.exposeInMainWorld('pet', {
   onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
   // Wake word heard (section H): bark + perk up as acknowledgement.
   onWakeBark: (cb) => ipcRenderer.on('wake-bark', () => cb()),
+  // Display sleep/wake reconcile: main pushes the window's true (clamped)
+  // position so the renderer re-homes there, fixing post-unlock drift.
+  onResyncPos: (cb) => ipcRenderer.on('resync-pos', (_e, p) => cb(p)),
+  // Screen locked/asleep (true) or woken (false): pause/resume wandering so the
+  // dog doesn't roam blind against a stale work area while the screen is off.
+  onPowerSleep: (cb) => ipcRenderer.on('power-sleep', (_e, on) => cb(on)),
 });

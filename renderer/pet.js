@@ -248,6 +248,11 @@ let walkTarget = null;
 // phase directly instead of counting as an activity).
 let returningHome = false;
 
+// True while the screen is locked/asleep: the wander scheduler stands down so
+// the dog never roams against a stale work area (its position would otherwise
+// be scrambled on wake). Main reconciles the real window position on wake.
+let powerSleep = false;
+
 // Latest global cursor position in SCREEN points, fed by pet.onCursor (~30 Hz)
 // and refreshed inline by pointermove (which carries screen coords too). Drives
 // BOTH the resting gaze and the click-through hit-test — the hit-test derives
@@ -837,21 +842,21 @@ function scheduleActive() {
   clearTimeout(state.phaseTimer);
   // Don't arm the scheduler while live Claude sessions own the dog (the
   // resume after the last task is driven by refreshClaude's resume timer).
-  if (state.paused || state.dragging || claudeHolding()) return;
+  if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
   const delay = rand(REST_MIN, REST_MAX);
   state.phaseTimer = setTimeout(enterActive, delay);
 }
 
 // Begin an ACTIVE phase: run n=1 (60%) or 2 (40%) activities back-to-back.
 function enterActive() {
-  if (state.paused || state.dragging || claudeHolding()) return;
+  if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
   state.activitiesLeft = Math.random() < 0.4 ? 2 : 1;
   runNextActivity();
 }
 
 // Start the next activity in the current ACTIVE phase.
 function runNextActivity() {
-  if (state.paused || state.dragging || claudeHolding()) return;
+  if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
   const choice = pickActivity();
   if (choice === 'walk') {
     startWalk();
@@ -906,7 +911,7 @@ function startWalk() {
   // Re-query the work area each walk so display/resolution changes are honored.
   // getWorkArea is async; nothing else should drive the dog while we await it.
   window.pet.getWorkArea().then((wa) => {
-    if (state.paused || state.dragging || claudeHolding()) return;
+    if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
 
     // Bounds for the window top-left so the whole window stays on-screen.
     const minX = wa.x;
@@ -1169,6 +1174,38 @@ window.pet.onWakeBark(() => {
   returningHome = false;
   state.activitiesLeft = 1;
   setClip('bark', { loopTarget: 1 });
+});
+
+// Display sleep/wake reconcile (fixes the post-unlock position scramble): main
+// pushes the window's true, on-screen-clamped position; adopt it as the new
+// home and settle there so gaze, click-through and wandering all re-anchor.
+window.pet.onResyncPos((p) => {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+  walkTarget = null;
+  returningHome = false;
+  pendingMove = null;
+  clearTimeout(state.phaseTimer);
+  clearTimeout(state.resumeTimer);
+  state.pos = { x: p.x, y: p.y };
+  state.home = { x: p.x, y: p.y };
+  if (!state.paused && !state.dragging) enterRest();
+});
+
+// Screen locked/asleep (on=true) → stand the scheduler down and settle to eyes;
+// woken (on=false) → resume the rest/active cycle. The authoritative position
+// fix arrives separately via onResyncPos on wake.
+window.pet.onPowerSleep((on) => {
+  powerSleep = !!on;
+  if (on) {
+    clearTimeout(state.phaseTimer);
+    clearTimeout(state.resumeTimer);
+    walkTarget = null;
+    returningHome = false;
+    pendingMove = null;
+    setClip('eyes');
+  } else if (!state.paused && !state.dragging) {
+    enterRest();
+  }
 });
 
 // ---- Claude Code status layer (section D) -----------------------------------

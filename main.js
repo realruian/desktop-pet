@@ -12,6 +12,7 @@ const {
   Notification,
   systemPreferences,
   globalShortcut,
+  powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -160,6 +161,32 @@ function createWindow() {
     }
     win = null;
   });
+}
+
+// Snap the window back onto a visible display and resync the renderer's idea of
+// where it is. macOS routinely repositions a 'screen-saver'-level window across
+// a display sleep/wake or layout change (lock → unlock is the classic trigger);
+// the renderer's state.pos/home would then be stale, scrambling gaze,
+// click-through and the wander origin. We clamp the window fully inside the
+// nearest display's work area, re-assert the always-on-top level (it can drop
+// on wake), and push the corrected position so the renderer re-homes there.
+function reconcileWindow() {
+  if (!win) return;
+  try {
+    const [x, y] = win.getPosition();
+    const center = { x: x + WIN / 2, y: y + WIN / 2 };
+    const wa = (
+      screen.getDisplayNearestPoint(center) || screen.getPrimaryDisplay()
+    ).workArea;
+    const cx = Math.round(Math.max(wa.x, Math.min(x, wa.x + wa.width - WIN)));
+    const cy = Math.round(Math.max(wa.y, Math.min(y, wa.y + wa.height - WIN)));
+    win.setPosition(cx, cy);
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.webContents.send('resync-pos', { x: cx, y: cy });
+  } catch (err) {
+    console.log('[power] reconcile failed: ' + err.message);
+  }
 }
 
 // ---- IPC: privileged operations requested by the renderer -------------------
@@ -1197,6 +1224,25 @@ app.whenReady().then(() => {
       dropCatcher.setBounds(win.getBounds());
     }
   });
+
+  // Display sleep/wake & layout changes scramble the window's position (lock →
+  // unlock is the usual culprit): tell the renderer to settle, then snap the
+  // window back on-screen and resync. Reconcile twice — once now, once after a
+  // beat — because display metrics can still be settling on the wake event.
+  const calmThenReconcile = () => {
+    if (win) win.webContents.send('power-sleep', false); // wake → resume motion
+    reconcileWindow();
+    setTimeout(reconcileWindow, 900);
+  };
+  powerMonitor.on('resume', calmThenReconcile);
+  powerMonitor.on('unlock-screen', calmThenReconcile);
+  powerMonitor.on('suspend', () => win && win.webContents.send('power-sleep', true));
+  powerMonitor.on('lock-screen', () => win && win.webContents.send('power-sleep', true));
+  // A monitor turning on/off, resolution change, or display add/remove.
+  screen.on('display-metrics-changed', reconcileWindow);
+  screen.on('display-added', reconcileWindow);
+  screen.on('display-removed', reconcileWindow);
+
   // Dev-only eval/capture bridge; inert unless PET_TEST_PORT is set.
   startTestBridge();
 
