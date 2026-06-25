@@ -1128,6 +1128,29 @@ function eatAndOpen(p, from) {
   setClip('wave', { loopTarget: 2 });
 }
 
+// 「演示动作」：把每个动作依次播一遍，方便一次看全（日常是随机触发、要干等）。
+// 用定时器轮播，播完回到正常的休息/活动循环。
+let demoTimer = null;
+function runDemo() {
+  if (state.paused || demoTimer) return;
+  clearTimeout(state.phaseTimer);
+  clearTimeout(state.resumeTimer);
+  walkTarget = null;
+  returningHome = false;
+  const seq = ['walk', 'scratch', 'wave', 'roll', 'cheer'];
+  let i = 0;
+  const next = () => {
+    if (i >= seq.length) {
+      demoTimer = null;
+      enterRest();
+      return;
+    }
+    setClip(seq[i++]);
+    demoTimer = setTimeout(next, 1800);
+  };
+  next();
+}
+
 // ---- Menu commands from main ------------------------------------------------
 
 window.pet.onMenuCommand((cmd) => {
@@ -1137,12 +1160,16 @@ window.pet.onMenuCommand((cmd) => {
       // Force REST and stop the scheduler until resumed.
       clearTimeout(state.phaseTimer);
       clearTimeout(state.resumeTimer);
+      clearTimeout(demoTimer);
+      demoTimer = null;
       walkTarget = null;
       returningHome = false;
       setClip('eyes');
     } else {
       enterRest();
     }
+  } else if (cmd === 'demo') {
+    runDemo();
   }
 });
 

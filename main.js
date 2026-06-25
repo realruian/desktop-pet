@@ -19,7 +19,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { execFile, spawn } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 
 // Only one 河马 at a time: a second launch (double-clicking the .app while
 // it's already running, say) just exits, after nudging the first instance.
@@ -240,6 +240,10 @@ ipcMain.on('show-menu', () => {
         isPaused = !isPaused;
         win.webContents.send('menu-command', 'toggle-pause');
       },
+    },
+    {
+      label: '演示动作',
+      click: () => win && win.webContents.send('menu-command', 'demo'),
     },
     {
       label: '语音唤醒（喊「河马河马」）',
@@ -1246,8 +1250,47 @@ function setSystemDragActive(on) {
   }
 }
 
-// 拖拽依赖（python3 + pyobjc）缺失时只提醒一次，避免反复打扰。
+// 拖拽依赖（python + pyobjc）缺失时只提醒一次，避免反复打扰。
 let dragDepNotified = false;
+function notifyDragDep() {
+  if (isQuitting || dragDepNotified) return;
+  dragDepNotified = true;
+  if (Notification.isSupported()) {
+    new Notification({
+      title: '「拖文件起终端」未启用',
+      body: '需要带 pyobjc 的 python3。装好（如 pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa）后重启河马即可开启。',
+    }).show();
+  }
+}
+
+// 找一个装了 pyobjc 的 python 跑拖拽监听：macOS 自带的 /usr/bin/python3 常缺
+// pyobjc（且编译困难），优先用 Homebrew 的（有预编译 wheel）。探测一次并缓存。
+let cachedPython;
+function findPython() {
+  if (cachedPython !== undefined) return cachedPython;
+  const candidates = [
+    '/opt/homebrew/bin/python3.12',
+    '/opt/homebrew/bin/python3',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3',
+  ];
+  for (const cand of candidates) {
+    try {
+      execFileSync(
+        cand,
+        ['-c', 'import objc, Quartz; from AppKit import NSPasteboard'],
+        { stdio: 'ignore', timeout: 5000 }
+      );
+      cachedPython = cand;
+      return cand;
+    } catch (_) {
+      /* 这个 python 没 pyobjc / 不存在，试下一个 */
+    }
+  }
+  cachedPython = null;
+  return null;
+}
+
 function startDragWatcher() {
   const py = [
     'import time',
@@ -1272,8 +1315,14 @@ function startDragWatcher() {
     "            print('E', flush=True)",
     '    time.sleep(0.05)',
   ].join('\n');
+  const python = findPython();
+  if (!python) {
+    console.log('[drag] no python with pyobjc — drops disabled');
+    notifyDragDep();
+    return;
+  }
   try {
-    dragWatcher = spawn('/usr/bin/python3', ['-u', '-c', py], {
+    dragWatcher = spawn(python, ['-u', '-c', py], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
   } catch (err) {
@@ -1296,15 +1345,7 @@ function startDragWatcher() {
     setSystemDragActive(false);
     // 退出码 1 几乎都是缺 python3 的 pyobjc（import Quartz/AppKit 失败）：拖文件
     // 起终端整功能失效。首次发生弹一次通知引导安装，之后不再打扰。
-    if (code === 1 && !isQuitting && !dragDepNotified) {
-      dragDepNotified = true;
-      if (Notification.isSupported()) {
-        new Notification({
-          title: '「拖文件起终端」未启用',
-          body: '需要 Python 的 pyobjc：终端运行 pip3 install pyobjc 后重启河马即可开启。',
-        }).show();
-      }
-    }
+    if (code === 1) notifyDragDep();
   });
   console.log('[drag] system-drag watcher started');
 }
