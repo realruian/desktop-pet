@@ -1,4 +1,4 @@
-/* settings.css — 设置面板。沿用 chat 卡片的深色半透明调性，保持同套语言。 */
+/* settings.css — 设置面板。浅色风格，与聊天窗 / 头顶白气泡保持同套语言。 */
 
 * {
   margin: 0;
@@ -27,8 +27,10 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 14px;
-  background: rgba(24, 25, 34, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   overflow: hidden;
 }
 
@@ -39,13 +41,13 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 9px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   -webkit-app-region: drag;
   flex: none;
 }
 
 #title {
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(0, 0, 0, 0.6);
   font-size: 12.5px;
   font-weight: 600;
 }
@@ -57,7 +59,7 @@ body {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(0, 0, 0, 0.4);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -71,8 +73,8 @@ body {
 }
 
 #close:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.75);
 }
 
 /* ---- 表单区 ---- */
@@ -91,7 +93,7 @@ body {
 }
 
 #form::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.16);
   border-radius: 3px;
 }
 
@@ -99,9 +101,9 @@ body {
 #welcome {
   font-size: 12px;
   line-height: 1.55;
-  color: rgba(255, 220, 150, 0.95);
-  background: rgba(255, 200, 100, 0.08);
-  border: 1px solid rgba(255, 200, 100, 0.22);
+  color: #8a5a00;
+  background: rgba(255, 193, 7, 0.12);
+  border: 1px solid rgba(255, 193, 7, 0.4);
   padding: 9px 11px;
   border-radius: 8px;
 }
@@ -113,7 +115,7 @@ body {
 }
 
 .field .label {
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(0, 0, 0, 0.7);
   font-size: 12px;
   font-weight: 500;
 }
@@ -121,23 +123,23 @@ body {
 .field .label em {
   font-style: normal;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(0, 0, 0, 0.4);
   margin-left: 5px;
 }
 
 .field .hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(0, 0, 0, 0.45);
   user-select: text;
 }
 
 .field input[type='text'],
 .field input[type='password'] {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.94);
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(0, 0, 0, 0.88);
   padding: 7px 9px;
   font: inherit;
   outline: none;
@@ -147,39 +149,39 @@ body {
 /* 模型下拉：沿用输入框调性，右侧画一个自定义箭头 */
 .field select {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.94);
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(0, 0, 0, 0.88);
   padding: 7px 28px 7px 9px;
   font: inherit;
   outline: none;
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 48 48' fill='none'><path d='M12 18L24 30L36 18' stroke='rgba(255,255,255,0.5)' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 48 48' fill='none'><path d='M12 18L24 30L36 18' stroke='rgba(0,0,0,0.45)' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 9px center;
 }
 
 .field select:focus {
-  border-color: rgba(122, 162, 255, 0.6);
-  background-color: rgba(255, 255, 255, 0.09);
+  border-color: rgba(26, 115, 232, 0.6);
+  background-color: rgba(0, 0, 0, 0.02);
 }
 
 .field select optgroup,
 .field select option {
-  background: #1c1d26;
-  color: rgba(255, 255, 255, 0.94);
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.88);
 }
 
 .field input:focus {
-  border-color: rgba(122, 162, 255, 0.6);
-  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(26, 115, 232, 0.6);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .field input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(0, 0, 0, 0.32);
 }
 
 .field .row {
@@ -194,10 +196,10 @@ body {
 .field .row button {
   flex: none;
   width: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.6);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -211,7 +213,7 @@ body {
 }
 
 .field .row button:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 /* ---- 底部操作栏 ---- */
@@ -222,41 +224,41 @@ body {
   align-items: center;
   gap: 8px;
   padding: 9px 12px 11px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 #openFile {
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 0, 0, 0.55);
   padding: 6px 10px;
   font: inherit;
   cursor: pointer;
 }
 
 #openFile:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.8);
 }
 
 #status {
   flex: 1;
   font-size: 11.5px;
-  color: rgba(120, 220, 150, 0.9);
+  color: rgba(30, 140, 70, 0.95);
   text-align: right;
   padding-right: 4px;
   min-height: 14px;
 }
 
 #status.error {
-  color: rgba(255, 140, 120, 0.95);
+  color: #c5221f;
 }
 
 #save {
   border: none;
   border-radius: 8px;
-  background: #4a7dff;
+  background: #1a73e8;
   color: #fff;
   padding: 7px 16px;
   font: inherit;
@@ -265,12 +267,12 @@ body {
 }
 
 #save:hover {
-  background: #5d8bff;
+  background: #1967d2;
 }
 
 #save:disabled {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.28);
   cursor: default;
 }
 
@@ -282,30 +284,30 @@ body {
 
 .preset {
   flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.75);
   padding: 7px 8px;
   font: inherit;
   cursor: pointer;
 }
 
 .preset:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .preset.active {
-  border-color: rgba(122, 162, 255, 0.7);
-  background: rgba(122, 162, 255, 0.18);
-  color: #fff;
+  border-color: rgba(26, 115, 232, 0.7);
+  background: rgba(26, 115, 232, 0.12);
+  color: #1a73e8;
 }
 
 /* ---- 「恢复默认」文字按钮 ---- */
 .linkbtn {
   border: none;
   background: none;
-  color: rgba(122, 162, 255, 0.9);
+  color: #1a73e8;
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -314,7 +316,7 @@ body {
 }
 
 .linkbtn:hover {
-  color: #9db8ff;
+  color: #1967d2;
   text-decoration: underline;
 }
 
@@ -324,10 +326,10 @@ body {
   resize: vertical;
   min-height: 64px;
   max-height: 160px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.94);
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(0, 0, 0, 0.88);
   padding: 7px 9px;
   font: inherit;
   line-height: 1.5;
@@ -336,12 +338,12 @@ body {
 }
 
 #persona:focus {
-  border-color: rgba(122, 162, 255, 0.6);
-  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(26, 115, 232, 0.6);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 #persona::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(0, 0, 0, 0.32);
 }
 
 /* ---- 语音唤醒：开关 + 灵敏度 ---- */
@@ -368,7 +370,7 @@ body {
 .switch .track {
   flex: 1;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.18);
   transition: background 0.15s;
 }
 
@@ -381,11 +383,12 @@ body {
   height: 16px;
   border-radius: 50%;
   background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   transition: transform 0.15s;
 }
 
 .switch input:checked + .track {
-  background: #4a7dff;
+  background: #1a73e8;
 }
 
 .switch input:checked + .track::before {
@@ -394,7 +397,7 @@ body {
 
 .switchlabel {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(0, 0, 0, 0.7);
   margin-left: 8px;
 }
 
@@ -404,7 +407,7 @@ body {
 
 .wakerow .sublabel {
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(0, 0, 0, 0.5);
   margin-right: 6px;
 }
 
@@ -412,10 +415,10 @@ body {
 #idleChatterMin {
   width: 64px;
   flex: none;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.94);
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(0, 0, 0, 0.88);
   padding: 6px 8px;
   font: inherit;
   outline: none;
@@ -424,22 +427,22 @@ body {
 
 #wakeThreshold:focus,
 #idleChatterMin:focus {
-  border-color: rgba(122, 162, 255, 0.6);
+  border-color: rgba(26, 115, 232, 0.6);
 }
 
 /* ---- 测试按钮（次要动作） ---- */
 #test.ghost {
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 8px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(0, 0, 0, 0.7);
   padding: 7px 12px;
   font: inherit;
   cursor: pointer;
 }
 
 #test.ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 #test.ghost:disabled {
