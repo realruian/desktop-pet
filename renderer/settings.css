@@ -244,3 +244,174 @@ body {
   color: rgba(255, 255, 255, 0.3);
   cursor: default;
 }
+
+/* ---- 服务商预设按钮 ---- */
+.presets {
+  display: flex;
+  gap: 6px;
+}
+
+.preset {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 7px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.preset:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.preset.active {
+  border-color: rgba(122, 162, 255, 0.7);
+  background: rgba(122, 162, 255, 0.18);
+  color: #fff;
+}
+
+/* ---- 「恢复默认」文字按钮 ---- */
+.linkbtn {
+  border: none;
+  background: none;
+  color: rgba(122, 162, 255, 0.9);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 8px;
+}
+
+.linkbtn:hover {
+  color: #9db8ff;
+  text-decoration: underline;
+}
+
+/* ---- 人设文本域 ---- */
+#persona {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  max-height: 160px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.94);
+  padding: 7px 9px;
+  font: inherit;
+  line-height: 1.5;
+  outline: none;
+  user-select: text;
+}
+
+#persona:focus {
+  border-color: rgba(122, 162, 255, 0.6);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+#persona::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ---- 语音唤醒：开关 + 灵敏度 ---- */
+.wakerow {
+  align-items: center;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 20px;
+  flex: none;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch .track {
+  flex: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.15s;
+}
+
+.switch .track::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch input:checked + .track {
+  background: #4a7dff;
+}
+
+.switch input:checked + .track::before {
+  transform: translateX(16px);
+}
+
+.switchlabel {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-left: 8px;
+}
+
+.wakerow .spacer {
+  flex: 1;
+}
+
+.wakerow .sublabel {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 6px;
+}
+
+#wakeThreshold {
+  width: 64px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.94);
+  padding: 6px 8px;
+  font: inherit;
+  outline: none;
+  text-align: center;
+}
+
+#wakeThreshold:focus {
+  border-color: rgba(122, 162, 255, 0.6);
+}
+
+/* ---- 测试按钮（次要动作） ---- */
+#test.ghost {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  padding: 7px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+#test.ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#test.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

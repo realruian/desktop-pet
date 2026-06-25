@@ -37,6 +37,21 @@
         <div id="welcome" hidden>
           你好！填一下 API Key 我们就能开始聊天了。
         </div>
+
+        <!-- 服务商预设：一键填好接口地址 -->
+        <div class="field">
+          <span class="label">服务商</span>
+          <div class="presets">
+            <button id="presetOpenRouter" type="button" class="preset">
+              OpenRouter
+            </button>
+            <button id="presetAiHubMix" type="button" class="preset">
+              AiHubMix
+            </button>
+          </div>
+          <span class="hint">选一个自动填接口地址；两家模型 ID 通用</span>
+        </div>
+
         <label class="field">
           <span class="label">API Key <em>必填</em></span>
           <div class="row">
@@ -45,10 +60,15 @@
               type="password"
               autocomplete="off"
               spellcheck="false"
-              placeholder="sk-or-... 或 sk-..."
+              placeholder="粘贴你的 API Key"
             />
             <!-- IconPark / Base / preview-open：显示/隐藏密码（JS 切换图标）-->
-            <button id="toggleKey" type="button" title="显示/隐藏" aria-label="显示或隐藏密码">
+            <button
+              id="toggleKey"
+              type="button"
+              title="显示/隐藏"
+              aria-label="显示或隐藏密码"
+            >
               <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
                 <path
                   d="M24 12C13 12 5 24 5 24C5 24 13 36 24 36C35 36 43 24 43 24C43 24 35 12 24 12Z"
@@ -60,21 +80,48 @@
               </svg>
             </button>
           </div>
-          <span class="hint"
-            >OpenRouter（sk-or- 开头）或 Moonshot 直连都行。Key 只存在你电脑本地</span
-          >
+          <span class="hint">Key 只存在你电脑本地，不上传</span>
         </label>
 
-        <label class="field">
+        <!-- 模型：可搜索下拉，动态拉取该服务商的真实模型列表 -->
+        <div class="field">
           <span class="label">模型</span>
-          <input
-            id="model"
-            type="text"
-            spellcheck="false"
-            placeholder="qwen/qwen3-235b-a22b-2507"
-          />
-          <span class="hint">用 Moonshot 直连填 kimi-latest</span>
-        </label>
+          <div class="row">
+            <input
+              id="model"
+              type="text"
+              spellcheck="false"
+              list="modelList"
+              placeholder="点开选 / 输入关键词过滤"
+            />
+            <datalist id="modelList"></datalist>
+            <!-- IconPark / 重载：拉取可用模型 -->
+            <button
+              id="refreshModels"
+              type="button"
+              title="拉取该服务商的可用模型"
+              aria-label="拉取模型"
+            >
+              <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path
+                  d="M42 24C42 33.94 33.94 42 24 42C14.06 42 6 33.94 6 24C6 14.06 14.06 6 24 6C30.52 6 36.23 9.46 39.42 14.66"
+                  stroke="currentColor"
+                  stroke-width="4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M40 6V16H30"
+                  stroke="currentColor"
+                  stroke-width="4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+          <span class="hint" id="modelHint">点右侧按钮拉取可用模型</span>
+        </div>
 
         <label class="field">
           <span class="label">接口地址</span>
@@ -84,10 +131,24 @@
             spellcheck="false"
             placeholder="https://openrouter.ai/api/v1"
           />
-          <span class="hint"
-            >Moonshot 直连填 https://api.moonshot.cn/v1</span
-          >
         </label>
+
+        <!-- 桌宠人设（系统提示词）：留空用默认 -->
+        <div class="field">
+          <span class="label"
+            >桌宠人设 <em>可选</em>
+            <button id="resetPersona" type="button" class="linkbtn">
+              恢复默认
+            </button>
+          </span>
+          <textarea
+            id="persona"
+            rows="4"
+            spellcheck="false"
+            placeholder="留空＝用默认河马人设。想自定义就写它的性格、说话风格、能力边界…"
+          ></textarea>
+          <span class="hint">改完下次发消息即时生效，无需重启</span>
+        </div>
 
         <label class="field">
           <span class="label">Obsidian 笔记库 <em>可选</em></span>
@@ -99,7 +160,12 @@
               placeholder="/Users/.../你的库"
             />
             <!-- IconPark / Office / folder-close：选择文件夹 -->
-            <button id="pickVault" type="button" title="选择文件夹" aria-label="选择文件夹">
+            <button
+              id="pickVault"
+              type="button"
+              title="选择文件夹"
+              aria-label="选择文件夹"
+            >
               <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
                 <path
                   d="M5 8H22L26 14H43V40H5V8Z"
@@ -110,16 +176,37 @@
               </svg>
             </button>
           </div>
-          <span class="hint"
-            >填了就会本地检索笔记作为参考；留空跳过</span
-          >
+          <span class="hint">填了就本地检索笔记作参考；留空跳过</span>
         </label>
+
+        <!-- 语音唤醒：开关 + 灵敏度 -->
+        <div class="field">
+          <span class="label">语音唤醒（喊「河马河马」）</span>
+          <div class="row wakerow">
+            <label class="switch">
+              <input id="wakeEnabled" type="checkbox" />
+              <span class="track"></span>
+            </label>
+            <span class="switchlabel" id="wakeLabel">关闭</span>
+            <span class="spacer"></span>
+            <span class="sublabel">灵敏度</span>
+            <input
+              id="wakeThreshold"
+              type="number"
+              step="0.05"
+              min="0.1"
+              max="0.5"
+            />
+          </div>
+          <span class="hint">越低越灵敏（默认 0.2；误触发多调高、听不到调低）</span>
+        </div>
       </main>
       <footer id="actions">
         <button id="openFile" type="button" title="编辑完整 config.json">
-          高级（打开文件）
+          高级
         </button>
         <span id="status"></span>
+        <button id="test" type="button" class="ghost">测试</button>
         <button id="save" type="button">保存</button>
       </footer>
     </div>

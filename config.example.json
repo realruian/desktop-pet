@@ -3,7 +3,8 @@
     "apiKey": "你的 API Key：OpenRouter（sk-or- 开头，https://openrouter.ai）或 Moonshot 直连（https://platform.moonshot.cn）均可",
     "model": "qwen/qwen3-235b-a22b-2507",
     "baseURL": "https://openrouter.ai/api/v1",
-    "_说明": "用 Moonshot 直连时改为 model: kimi-latest, baseURL: https://api.moonshot.cn/v1"
+    "persona": "",
+    "_说明": "model/baseURL 也能在右键设置面板里改：OpenRouter 用 https://openrouter.ai/api/v1，AiHubMix 用 https://aihubmix.com/v1（两家模型 ID 通用，可在面板点「拉取模型」选）。persona 留空＝用内置默认河马人设，想自定义就在这里或设置面板填一段系统提示词"
   },
   "obsidian": {
     "vault": "/Users/你的用户名/path/to/你的Obsidian库",

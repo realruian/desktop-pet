@@ -343,13 +343,12 @@ ipcMain.on('open-in-claude', (_e, p) => {
 
 // 判断一段字符串看起来是不是真的 API Key——不是真 Key 就当成"还没配"。
 // 这是为了挡掉 config.example.json 残留的占位文案（"你的 API Key..."），
-// 那种字符串非空、!apiKey 判不出来，会被当真 Key 发出去拿到 401 报错，
-// 对新手非常不友好。OpenRouter / Moonshot 的 Key 都以 sk- 开头，长度也都过 20。
+// 只挡明显的空/极短串：拿这个判断「Key 是否填好」（决定要不要弹设置、欢迎横幅）。
+// 不再强制 sk- 前缀——OpenRouter / AiHubMix / Moonshot 多数是 sk-，但别的服务商
+// 不一定，写死前缀会把合法 Key 误判成「没填」，反而更不友好。
 function looksLikeRealKey(k) {
   if (typeof k !== 'string') return false;
-  const s = k.trim();
-  if (s.length < 15) return false;
-  return s.startsWith('sk-');
+  return k.trim().length >= 15;
 }
 
 // ---- Kimi chat (section F) ---------------------------------------------------
@@ -389,6 +388,8 @@ function loadKimiConfig() {
   if (process.env.PET_WAKE === '1') wakeEnabled = true;
   return {
     apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
+    // 人设：用户在设置面板填了就用，留空回退到内置默认 PERSONA。
+    persona: process.env.PET_PERSONA || cfg.persona || PERSONA,
     baseURL:
       process.env.PET_KIMI_BASE ||
       cfg.baseURL ||
@@ -467,7 +468,7 @@ function openConfigFile() {
 
 // 设置窗的尺寸；窗体本身透明无边框，深色卡片由 settings.css 画。
 const SETTINGS_W = 360;
-const SETTINGS_H = 480;
+const SETTINGS_H = 560;
 
 function createSettingsWindow() {
   settingsWin = new BrowserWindow({
@@ -525,11 +526,26 @@ function openSettings() {
 // 读取当前 4 个关键字段：apiKey/model/baseURL/vault。复用 loadKimiConfig 的解析逻辑。
 ipcMain.handle('settings:load', () => {
   const c = loadKimiConfig();
+  // persona 回填「用户实际填的原始值」（空＝用默认），不能用 c.persona（已回退默认）；
+  // 另附 defaultPersona 全文，供面板「恢复默认」把默认人设填进去再改。
+  let rawPersona = '';
+  for (const p of CONFIG_PATHS) {
+    try {
+      rawPersona = (JSON.parse(fs.readFileSync(p, 'utf8')).kimi || {}).persona || '';
+      break;
+    } catch (_) {
+      /* 没有就当空 */
+    }
+  }
   return {
     apiKey: c.apiKey,
     model: c.model,
     baseURL: c.baseURL,
     vault: c.vault,
+    persona: rawPersona,
+    defaultPersona: PERSONA,
+    wakeEnabled: c.wakeEnabled,
+    wakeThreshold: c.wakeThreshold,
   };
 });
 
@@ -553,16 +569,109 @@ ipcMain.handle('settings:save', (_e, patch) => {
     model: patch.model || parsed.kimi?.model || 'qwen/qwen3-235b-a22b-2507',
     baseURL:
       patch.baseURL || parsed.kimi?.baseURL || 'https://openrouter.ai/api/v1',
+    // 人设：trim 后存；空串＝清掉自定义、回退默认（loadKimiConfig 里 || PERSONA）
+    persona: (patch.persona || '').trim(),
   });
   parsed.obsidian = Object.assign({}, parsed.obsidian, {
     vault: patch.vault || '',
   });
+  // 语音唤醒：开关 + 灵敏度也从面板存（之前只能改 JSON / 右键菜单）
+  if (typeof patch.wakeEnabled === 'boolean') {
+    parsed.wake = Object.assign({}, parsed.wake, {
+      enabled: patch.wakeEnabled,
+      threshold: Number(patch.wakeThreshold) || parsed.wake?.threshold || 0.2,
+    });
+  }
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
+    // 唤醒开关即时生效（重启 KWS 引擎）；config 已在上面写过，不再重复持久化
+    if (typeof patch.wakeEnabled === 'boolean') {
+      setWakeEnabled(patch.wakeEnabled, false);
+    }
     return { ok: true, path: target };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+// 「测试」按钮：用面板当前填的 Key/接口/模型发一个极小请求，验证通不通。
+ipcMain.handle('settings:test', async (_e, patch) => {
+  const apiKey = (patch?.apiKey || '').trim();
+  const baseURL =
+    (patch?.baseURL || '').trim() || 'https://openrouter.ai/api/v1';
+  const model = (patch?.model || '').trim();
+  if (!apiKey) return { ok: false, error: '先填 API Key' };
+  if (!model) return { ok: false, error: '先选一个模型' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      }),
+      signal: ctrl.signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail =
+        (data && data.error && data.error.message) || 'HTTP ' + resp.status;
+      return { ok: false, error: detail };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err && err.name === 'AbortError'
+          ? '超时（15s），网络或接口暂不可用'
+          : (err && err.message) || String(err),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+// 拉取该服务商可用的模型列表（GET {baseURL}/models），填进面板的可搜索下拉。
+ipcMain.handle('settings:list-models', async (_e, patch) => {
+  const apiKey = (patch?.apiKey || '').trim();
+  const baseURL =
+    (patch?.baseURL || '').trim() || 'https://openrouter.ai/api/v1';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const resp = await fetch(baseURL.replace(/\/$/, '') + '/models', {
+      headers: apiKey ? { Authorization: 'Bearer ' + apiKey } : {},
+      signal: ctrl.signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail =
+        (data && data.error && data.error.message) || 'HTTP ' + resp.status;
+      return { ok: false, error: detail };
+    }
+    // OpenAI 风格：{ data: [{ id }] }
+    const ids = Array.isArray(data && data.data)
+      ? data.data.map((m) => m && m.id).filter(Boolean)
+      : [];
+    return { ok: true, models: ids };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err && err.name === 'AbortError'
+          ? '超时（15s）'
+          : (err && err.message) || String(err),
+    };
+  } finally {
+    clearTimeout(timer);
   }
 });
 
@@ -795,7 +904,7 @@ ipcMain.on('chat-hide', () => {
 // ({role:'user'|'assistant', content} only — we prepend the persona here).
 // Resolves {ok:true, content} | {ok:false, error}; never throws to the caller.
 ipcMain.handle('chat-send', async (_e, messages) => {
-  const { apiKey, baseURL, model, vault } = loadKimiConfig();
+  const { apiKey, baseURL, model, vault, persona } = loadKimiConfig();
   if (!looksLikeRealKey(apiKey)) {
     // 顺手把设置面板弹出来，朋友看到错误的同一时刻就知道下一步该去哪
     openSettings();
@@ -818,7 +927,7 @@ ipcMain.handle('chat-send', async (_e, messages) => {
 
   // Obsidian retrieval: look up the latest user question in the vault and, on
   // a hit, attach the snippets as reference context (system message).
-  const system = [{ role: 'system', content: PERSONA }];
+  const system = [{ role: 'system', content: persona }];
   const lastUser = [...sane].reverse().find((m) => m.role === 'user');
   if (vault && lastUser) {
     const notes = await searchVault(vault, lastUser.content);
@@ -1137,6 +1246,8 @@ function setSystemDragActive(on) {
   }
 }
 
+// 拖拽依赖（python3 + pyobjc）缺失时只提醒一次，避免反复打扰。
+let dragDepNotified = false;
 function startDragWatcher() {
   const py = [
     'import time',
@@ -1183,6 +1294,17 @@ function startDragWatcher() {
     console.log('[drag] watcher exited (' + code + ') — drops disabled');
     dragWatcher = null;
     setSystemDragActive(false);
+    // 退出码 1 几乎都是缺 python3 的 pyobjc（import Quartz/AppKit 失败）：拖文件
+    // 起终端整功能失效。首次发生弹一次通知引导安装，之后不再打扰。
+    if (code === 1 && !isQuitting && !dragDepNotified) {
+      dragDepNotified = true;
+      if (Notification.isSupported()) {
+        new Notification({
+          title: '「拖文件起终端」未启用',
+          body: '需要 Python 的 pyobjc：终端运行 pip3 install pyobjc 后重启河马即可开启。',
+        }).show();
+      }
+    }
   });
   console.log('[drag] system-drag watcher started');
 }
