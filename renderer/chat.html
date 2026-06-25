@@ -13,7 +13,59 @@
     <div id="panel">
       <header id="titlebar">
         <span id="title">🐶 和多吉聊天</span>
-        <button id="close" title="收起">✕</button>
+        <div id="titleActions">
+          <!-- IconPark / Edit / delete-one：删除（垃圾桶）-->
+          <button id="clear" title="清空对话" aria-label="清空对话">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <path
+                d="M15 12L16.2 5H31.8L33 12"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M6 12H42"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+              />
+              <path
+                fill-rule="evenodd"
+                clip-rule="evenodd"
+                d="M37 12L35 43H13L11 12H37Z"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M19 35H29"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <!-- IconPark / Character / close-small：关闭-小 -->
+          <button id="close" title="收起" aria-label="收起">
+            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <path
+                d="M14 14L34 34"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M14 34L34 14"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
       </header>
       <main id="messages"></main>
       <footer id="composer">
@@ -22,7 +74,76 @@
           rows="1"
           placeholder="跟多吉说点什么…"
         ></textarea>
-        <button id="mic" title="按一下说话，再按一下结束">🎤</button>
+        <!-- IconPark / Hardware / microphone：麦克风 -->
+        <button id="mic" title="按一下说话，再按一下结束" aria-label="录音">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect
+              x="16"
+              y="4"
+              width="16"
+              height="28"
+              rx="8"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M10 21V24C10 31.732 16.268 38 24 38C31.732 38 38 31.732 38 24V21"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M24 5V11"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M16 16H21"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M27 16H32"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M16 22H21"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M27 22H32"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M24 38V44"
+              stroke="currentColor"
+              stroke-width="4"
+            />
+            <path
+              d="M16 44H32"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <button id="send" title="发送">↑</button>
       </footer>
     </div>

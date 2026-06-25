@@ -13,6 +13,8 @@ const {
   systemPreferences,
   globalShortcut,
   powerMonitor,
+  shell,
+  dialog,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -81,6 +83,10 @@ let win = null;
 // HIDES it so the conversation history survives reopening within a session.
 /** @type {BrowserWindow|null} */
 let chatWin = null;
+
+// 设置面板窗口（可视化配置 API Key 等）。同样懒创建 + 关闭只隐藏。
+/** @type {BrowserWindow|null} */
+let settingsWin = null;
 
 // Set while the app is really quitting, so chatWin's close handler lets the
 // window die instead of hiding it.
@@ -241,6 +247,10 @@ ipcMain.on('show-menu', () => {
       checked: wakeOn,
       click: (item) => setWakeEnabled(item.checked, true),
     },
+    {
+      label: '⚙️ 设置',
+      click: () => openSettings(),
+    },
     // Login-item control only makes sense for the packaged .app (in dev it
     // would register the bare Electron binary).
     ...(app.isPackaged
@@ -331,6 +341,17 @@ ipcMain.on('open-in-claude', (_e, p) => {
   }
 });
 
+// 判断一段字符串看起来是不是真的 API Key——不是真 Key 就当成"还没配"。
+// 这是为了挡掉 config.example.json 残留的占位文案（"你的 API Key..."），
+// 那种字符串非空、!apiKey 判不出来，会被当真 Key 发出去拿到 401 报错，
+// 对新手非常不友好。OpenRouter / Moonshot 的 Key 都以 sk- 开头，长度也都过 20。
+function looksLikeRealKey(k) {
+  if (typeof k !== 'string') return false;
+  const s = k.trim();
+  if (s.length < 15) return false;
+  return s.startsWith('sk-');
+}
+
 // ---- Kimi chat (section F) ---------------------------------------------------
 //
 // The pet can hold a conversation through Moonshot's Kimi API. The key lives in
@@ -406,6 +427,159 @@ function patchConfig(section, patch) {
     console.log('[cfg] could not persist ' + section + ': ' + err.message);
   }
 }
+
+// 决定一份"写哪里"的 config.json 路径。原则：写要和读对齐——
+// 如果已经存在 config.json，就覆盖它（避免出现"写到 A 但读 B"的分裂状态）；
+// 都不存在时再按场景新建：开发模式落仓库根方便 git diff，打包模式落 userData。
+function preferredConfigPath() {
+  for (const p of CONFIG_PATHS) {
+    if (fs.existsSync(p)) return p;
+  }
+  return app.isPackaged ? CONFIG_PATHS[0] : CONFIG_PATHS[1];
+}
+
+// 「⚙️ 设置」面板里的"高级 → 打开文件"按钮会调到这里。
+// 优先打开已存在的 config.json；都不存在时从 example 拷一份再打开，
+// 避免用户对着空文件干瞪眼。
+function openConfigFile() {
+  for (const p of CONFIG_PATHS) {
+    if (fs.existsSync(p)) {
+      shell.openPath(p).then((err) => {
+        if (err) console.log('[cfg] open failed: ' + err);
+      });
+      return;
+    }
+  }
+  const target = preferredConfigPath();
+  const example = path.join(__dirname, 'config.example.json');
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(example, target);
+    console.log('[cfg] seeded config.json at ' + target);
+    shell.openPath(target);
+  } catch (err) {
+    console.log('[cfg] could not seed config.json: ' + err.message);
+    shell.openPath(example);
+  }
+}
+
+// ---- 设置面板（可视化配置 API Key 等） ----------------------------------
+
+// 设置窗的尺寸；窗体本身透明无边框，深色卡片由 settings.css 画。
+const SETTINGS_W = 360;
+const SETTINGS_H = 480;
+
+function createSettingsWindow() {
+  settingsWin = new BrowserWindow({
+    width: SETTINGS_W,
+    height: SETTINGS_H,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    hasShadow: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    useContentSize: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-settings.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  // 跟聊天窗口一样浮在所有空间之上
+  settingsWin.setAlwaysOnTop(true, 'screen-saver');
+  settingsWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+
+  settingsWin.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      settingsWin.hide();
+    }
+  });
+  settingsWin.on('closed', () => {
+    settingsWin = null;
+  });
+}
+
+function openSettings() {
+  if (!settingsWin) createSettingsWindow();
+  // 贴着狗的位置摆：跟聊天面板一个模式，靠右、坐在狗上方
+  if (win) {
+    const [px, py] = win.getPosition();
+    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+    const x = Math.max(
+      wa.x + 8,
+      Math.min(px + WIN - SETTINGS_W, wa.x + wa.width - SETTINGS_W - 8)
+    );
+    const y = Math.max(wa.y + 8, py - SETTINGS_H - 6);
+    settingsWin.setPosition(Math.round(x), Math.round(y));
+  }
+  settingsWin.show();
+  settingsWin.focus();
+  // 通知渲染层"我刚被显示"，让它重新拉一次配置（外部改过文件的话也能看到最新值）
+  settingsWin.webContents.send('settings:shown');
+}
+
+// 读取当前 4 个关键字段：apiKey/model/baseURL/vault。复用 loadKimiConfig 的解析逻辑。
+ipcMain.handle('settings:load', () => {
+  const c = loadKimiConfig();
+  return {
+    apiKey: c.apiKey,
+    model: c.model,
+    baseURL: c.baseURL,
+    vault: c.vault,
+  };
+});
+
+// 写回配置：合并而非覆盖，保留 stt/hotkey/wake 等其它字段不动。
+ipcMain.handle('settings:save', (_e, patch) => {
+  if (!patch || typeof patch !== 'object') {
+    return { ok: false, error: '空表单' };
+  }
+  const target = preferredConfigPath();
+  let parsed = {};
+  for (const p of CONFIG_PATHS) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(p, 'utf8')) || {};
+      break;
+    } catch (_) {
+      /* 没有就当空 */
+    }
+  }
+  parsed.kimi = Object.assign({}, parsed.kimi, {
+    apiKey: patch.apiKey || '',
+    model: patch.model || parsed.kimi?.model || 'qwen/qwen3-235b-a22b-2507',
+    baseURL:
+      patch.baseURL || parsed.kimi?.baseURL || 'https://openrouter.ai/api/v1',
+  });
+  parsed.obsidian = Object.assign({}, parsed.obsidian, {
+    vault: patch.vault || '',
+  });
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
+    return { ok: true, path: target };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// "选文件夹"按钮：原生目录选择器，返回路径或空串
+ipcMain.handle('settings:pick-vault', async () => {
+  const res = await dialog.showOpenDialog(settingsWin || win, {
+    properties: ['openDirectory'],
+    title: '选择 Obsidian 笔记库根目录',
+  });
+  if (res.canceled || !res.filePaths.length) return '';
+  return res.filePaths[0];
+});
+
+ipcMain.on('settings:open-file', () => openConfigFile());
+ipcMain.on('settings:hide', () => {
+  if (settingsWin) settingsWin.hide();
+});
 
 // Resolve a bundled resource directory to a REAL filesystem path. Inside a
 // packaged app, files referenced by the native KWS reader can't live in the
@@ -590,6 +764,12 @@ function createChatWindow() {
 // Show the chat panel anchored to the pet: right-aligned with the dog, sitting
 // just above it, clamped into the work area.
 function openChat() {
+  // 没真 API Key 直接改弹设置——朋友双击 / 按 ⌥Space / 喊「多吉多吉」时
+  // 就不用先看到一个聊天窗、再被错误信息推去设置。一步直达。
+  if (!looksLikeRealKey(loadKimiConfig().apiKey)) {
+    openSettings();
+    return;
+  }
   if (!chatWin) createChatWindow();
   if (win) {
     const [px, py] = win.getPosition();
@@ -616,13 +796,12 @@ ipcMain.on('chat-hide', () => {
 // Resolves {ok:true, content} | {ok:false, error}; never throws to the caller.
 ipcMain.handle('chat-send', async (_e, messages) => {
   const { apiKey, baseURL, model, vault } = loadKimiConfig();
-  if (!apiKey) {
+  if (!looksLikeRealKey(apiKey)) {
+    // 顺手把设置面板弹出来，朋友看到错误的同一时刻就知道下一步该去哪
+    openSettings();
     return {
       ok: false,
-      error:
-        '还没配置 API Key：参考 config.example.json，在 ' +
-        path.join(CONFIG_DIR, 'config.json') +
-        ' 填入你的 Key（OpenRouter 或 Moonshot 均可）即可，无需重启。',
+      error: '还没填 API Key——已经帮你打开设置面板，填一下就能聊了。',
     };
   }
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -725,8 +904,9 @@ ipcMain.handle('ensure-mic', async () => {
 // Transcribe a base64 16k-mono WAV → { ok, text } | { ok, error }.
 ipcMain.handle('chat-transcribe', async (_e, b64wav) => {
   const { apiKey, baseURL, sttModel } = loadKimiConfig();
-  if (!apiKey) {
-    return { ok: false, error: '还没配置 API Key（config.json）。' };
+  if (!looksLikeRealKey(apiKey)) {
+    openSettings();
+    return { ok: false, error: '还没填 API Key——已经帮你打开设置面板。' };
   }
   if (typeof b64wav !== 'string' || b64wav.length < 1000) {
     return { ok: false, error: '没录到声音，再试一次？' };
@@ -1213,6 +1393,12 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+  // 首启 onboarding：还没填真 API Key 就在狗出场后稍等一会儿弹出设置面板，
+  // 让朋友不用自己摸索右键就能直接配。1.2s 是给狗"出场感"留的余地，
+  // 避免劈头盖脸把窗丢到脸上。
+  if (!looksLikeRealKey(loadKimiConfig().apiKey)) {
+    setTimeout(() => openSettings(), 1200);
+  }
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();
   // Drop catcher + system-drag watcher: file drops onto the dog (section E).

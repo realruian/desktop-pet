@@ -16,6 +16,7 @@ const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
 const micEl = document.getElementById('mic');
 const closeEl = document.getElementById('close');
+const clearEl = document.getElementById('clear');
 
 // Conversation history as Kimi messages: {role:'user'|'assistant', content}.
 const history = [];
@@ -41,8 +42,19 @@ function addTyping() {
   return div;
 }
 
-// Local greeting (no API call) so the panel feels alive on first open.
-addBubble('dog', '汪！我是多吉🐶 打字或者按 🎤 跟我说话都行～');
+// 本地欢迎气泡（不走 API），首次打开时让面板有人气
+const GREETING = '汪！我是多吉 🐶 打字或者按下面的话筒跟我说话都行～';
+addBubble('dog', GREETING);
+
+// 清空对话：清掉历史和气泡，重新放一句欢迎，回到刚开聊的状态。
+// 不弹确认——会话内是临时聊天、关掉聊天窗也不持久化，不是高风险操作。
+function clearConversation() {
+  history.length = 0;
+  messagesEl.innerHTML = '';
+  addBubble('dog', GREETING);
+  inputEl.focus();
+}
+clearEl.addEventListener('click', clearConversation);
 
 // Send a message. With no argument it sends the input box's content; voice
 // input calls it with the transcript directly.

@@ -116,11 +116,11 @@ const CHIP_COLOR = {
 // Animation clips: frame count + playback fps. Art faces LEFT by default.
 // (REST uses the separately-loaded, gaze-named `images.eyes` set — see below.)
 const CLIPS = {
-  walk: { fps: 10, frames: 9, faces: 'left' }, // side profile
-  scratch: { fps: 8, frames: 9, faces: 'front' },
-  bark: { fps: 9, frames: 9, faces: 'front' },
-  roll: { fps: 8, frames: 9, faces: 'front' },
-  bone: { fps: 8, frames: 9, faces: 'front' },
+  walk: { fps: 10, frames: 8, faces: 'left' }, // side profile（河马向左走，向右自动翻转）
+  scratch: { fps: 8, frames: 6, faces: 'front' }, // 河马：抱臂待机
+  bark: { fps: 9, frames: 4, faces: 'front' }, // 河马：挥手打招呼
+  roll: { fps: 8, frames: 6, faces: 'front' }, // 河马：微笑转头卖萌
+  bone: { fps: 8, frames: 5, faces: 'front' }, // 河马：捂嘴欢呼（当作开心接食）
   tearful: {
     fps: 1,
     frames: ['../assets/expressions/tearful.png'],
