@@ -278,6 +278,7 @@ const claude = {
   doneLabel: '', // label shown during the flash
   holding: false, // scheduler-hold transition tracking
   resumeTimer: null, // setTimeout id resuming the scheduler after the last task
+  bodyDisplay: null, // 当前身体姿态对应的 display（'working'|'waiting'），避免重复切换
 };
 
 const unlockNotice = {
@@ -823,9 +824,13 @@ function advanceAnimation(dt) {
       state.frame = 0;
       state.loops++;
       // In-place clips (scratch/wave/roll) end the activity once they've played
-      // the requested loops. Walk is driven by arrival at its target instead, so
-      // it ignores loopTarget here.
-      if (state.loopTarget > 0 && state.clipName !== 'walk') {
+      // the requested loops. Walk that is actually moving is driven by arrival at
+      // its target instead, so it ignores loopTarget. But a walk with NO walkTarget
+      // is the Claude「工作中」原地踏步——它照常按 loopTarget 收尾。
+      if (
+        state.loopTarget > 0 &&
+        (state.clipName !== 'walk' || !walkTarget)
+      ) {
         if (state.loops >= state.loopTarget) {
           onActivityDone();
           return;
@@ -1319,7 +1324,24 @@ function enterClaudeHold() {
   claude.resumeTimer = null;
   walkTarget = null;
   returningHome = false;
-  if (!state.dragging) setClip('eyes'); // attentive REST; eyes track cursor
+  // 身体姿态改由 refreshClaude 按 claude.display 调 applyClaudeBody 驱动
+  // （working→原地踏步，waiting→抱臂待机），不再在这里固定 eyes。
+}
+
+// 把 Claude 的合并状态映射到河马身体姿态（事件驱动）。
+// working：原地踏步几轮后由 onActivityDone 接回注视 REST（长期状态靠头顶芯片维持）；
+// waiting：切到抱臂待机并循环保持，表示「叉手等你确认」；其余兜底回 eyes。
+// 拖拽中不抢身体（用户操作优先）。
+function applyClaudeBody(display) {
+  if (state.dragging) return;
+  if (display === 'waiting') {
+    setClip('scratch'); // 抱臂待机，loopTarget=0 → 开放循环，定格保持
+  } else if (display === 'working') {
+    walkTarget = null; // 原地，不位移
+    setClip('walk', { loopTarget: 3 }); // 踏步 3 轮 → onActivityDone 接回 eyes
+  } else {
+    setClip('eyes');
+  }
 }
 
 // A task finished: flash done with its label and yip once. The chip/scheduler
@@ -1328,8 +1350,8 @@ function fireClaudeDone(label) {
   claude.doneLabel = label || '任务完成';
   claude.doneUntil = performance.now() + DONE_FLASH_MS;
   if (!state.dragging && !state.paused) {
-    state.activitiesLeft = 1; // a single celebratory yip
-    setClip('wave', { loopTarget: 1 });
+    state.activitiesLeft = 1; // 一次庆祝（review：任务完成、结果就绪）
+    setClip('cheer', { loopTarget: 1 });
   }
 }
 
@@ -1367,8 +1389,16 @@ function refreshClaude() {
       claude.holding = true;
       enterClaudeHold();
     }
+    // 按合并状态驱动身体姿态，仅在 display 变化时切换（避免每个事件都重置动画）。
+    // done 闪烁期间先让庆祝（cheer）播完再切，不打断。
+    const flashing = performance.now() < claude.doneUntil;
+    if (!flashing && claude.display !== claude.bodyDisplay) {
+      claude.bodyDisplay = claude.display;
+      applyClaudeBody(claude.display);
+    }
   } else if (claude.holding) {
     claude.holding = false;
+    claude.bodyDisplay = null;
     const wait =
       Math.max(0, claude.doneUntil - performance.now()) + CHIP_FADE_MS;
     clearTimeout(claude.resumeTimer);
