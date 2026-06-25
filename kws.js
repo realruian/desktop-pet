@@ -1,4 +1,4 @@
-// kws.js — offline wake-word ("多吉多吉") engine, main-process side (section H).
+// kws.js — offline wake-word ("河马河马") engine, main-process side (section H).
 //
 // Wraps sherpa-onnx-node's KeywordSpotter. Audio is captured by the hidden
 // listener renderer (Web Audio can't run in main), downsampled to 16 kHz mono
@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 
 const SAMPLE_RATE = 16000;
-// Ignore repeat detections within this window so one "多吉多吉" fires once.
+// Ignore repeat detections within this window so one "河马河马" fires once.
 const REARM_MS = 2500;
 
 class WakeEngine {

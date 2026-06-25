@@ -5,7 +5,7 @@
 // lifted — verified empirically: an identical transparent window that never
 // ignored the mouse receives drags fine, the pet window never does. So the pet
 // can't catch its own drops. Instead, main shows THIS window (never ignoring,
-// 'floating' level — the exact recipe verified to receive drags) at the dog's
+// 'floating' level — the exact recipe verified to receive drags) at the pet's
 // bounds for the duration of any system drag. It relays hover state and the
 // dropped path; the pet does the eating and the Terminal launch.
 

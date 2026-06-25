@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('pet', {
   // Main → renderer push -----------------------------------------------------
   onMenuCommand: (cb) => ipcRenderer.on('menu-command', (_e, c) => cb(c)),
   // Global cursor position in screen points, polled by main (~30 Hz). Drives
-  // the resting dog's gaze tracking.
+  // the resting pet's gaze tracking.
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, p) => cb(p)),
   // Claude Code hook events forwarded by main: { event, cwd } (section D).
   onClaudeEvent: (cb) => ipcRenderer.on('claude-event', (_e, d) => cb(d)),
@@ -34,9 +34,9 @@ contextBridge.exposeInMainWorld('pet', {
   // pet keeps ignoring mouse events during the drag; the catcher window
   // shown at its bounds is what actually receives the drop.
   onDragMode: (cb) => ipcRenderer.on('drag-mode', (_e, on) => cb(on)),
-  // Relayed from the catcher: a drag is hovering the dog (show the 📂 cue).
+  // Relayed from the catcher: a drag is hovering the pet (show the 📂 cue).
   onDropHover: (cb) => ipcRenderer.on('drop-hover', (_e, on) => cb(on)),
-  // Relayed from the catcher: a file/folder was dropped on the dog.
+  // Relayed from the catcher: a file/folder was dropped on the pet.
   onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
   // Wake word heard (section H): bark + perk up as acknowledgement.
   onWakeBark: (cb) => ipcRenderer.on('wake-bark', () => cb()),
@@ -44,6 +44,6 @@ contextBridge.exposeInMainWorld('pet', {
   // position so the renderer re-homes there, fixing post-unlock drift.
   onResyncPos: (cb) => ipcRenderer.on('resync-pos', (_e, p) => cb(p)),
   // Screen locked/asleep (true) or woken (false): pause/resume wandering so the
-  // dog doesn't roam blind against a stale work area while the screen is off.
+  // pet doesn't roam blind against a stale work area while the screen is off.
   onPowerSleep: (cb) => ipcRenderer.on('power-sleep', (_e, on) => cb(on)),
 });

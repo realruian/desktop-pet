@@ -64,11 +64,15 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// 显示/隐藏 Key 的小眼睛
+// 显示/隐藏 Key 的小眼睛：两个 IconPark 线性图标，跟随 currentColor。
+// 含 ASCII 双引号，整串用 backtick 包，避免被当字符串结束符。
+const EYE_SVG = `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 12C13 12 5 24 5 24C5 24 13 36 24 36C35 36 43 24 43 24C43 24 35 12 24 12Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="24" cy="24" r="6" stroke="currentColor" stroke-width="4"/></svg>`;
+const EYE_OFF_SVG = `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M6 14C6 14 14 24 24 24C34 24 42 14 42 14" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 24V32" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M34 21L39 28" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M14 21L9 28" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`;
 els.toggleKey.addEventListener('click', () => {
   const showing = els.apiKey.type === 'text';
   els.apiKey.type = showing ? 'password' : 'text';
-  els.toggleKey.textContent = showing ? '👁' : '🙈';
+  // 切回隐藏(password)→显示"可看"眼睛；切到明文(text)→显示"隐藏"图标
+  els.toggleKey.innerHTML = showing ? EYE_SVG : EYE_OFF_SVG;
 });
 
 // "选文件夹"按钮 → 主进程弹原生目录选择器
@@ -96,7 +100,7 @@ els.save.addEventListener('click', async () => {
   try {
     const res = await window.settings.save(payload);
     if (res && res.ok) {
-      flash('已保存 ✓');
+      flash('已保存');
     } else {
       flash('保存失败：' + (res && res.error) || '未知错误', true);
     }

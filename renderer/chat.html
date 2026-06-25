@@ -7,12 +7,12 @@
       content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
     />
     <link rel="stylesheet" href="chat.css" />
-    <title>柯基聊天</title>
+    <title>河马聊天</title>
   </head>
   <body>
     <div id="panel">
       <header id="titlebar">
-        <span id="title">🐶 和多吉聊天</span>
+        <span id="title">和河马聊天</span>
         <div id="titleActions">
           <!-- IconPark / Edit / delete-one：删除（垃圾桶）-->
           <button id="clear" title="清空对话" aria-label="清空对话">
@@ -72,7 +72,7 @@
         <textarea
           id="input"
           rows="1"
-          placeholder="跟多吉说点什么…"
+          placeholder="跟河马说点什么…"
         ></textarea>
         <!-- IconPark / Hardware / microphone：麦克风 -->
         <button id="mic" title="按一下说话，再按一下结束" aria-label="录音">
@@ -144,7 +144,25 @@
             />
           </svg>
         </button>
-        <button id="send" title="发送">↑</button>
+        <!-- IconPark / Arrow / up：发送 -->
+        <button id="send" title="发送" aria-label="发送">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path
+              d="M24 42V10"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M11 23L24 10L37 23"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </footer>
     </div>
     <script src="chat.js"></script>

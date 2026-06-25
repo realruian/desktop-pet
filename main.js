@@ -1,4 +1,4 @@
-// main.js — Electron main process for the Corgi Desktop Pet.
+// main.js — Electron main process for the Hema Desktop Pet.
 // Owns the transparent, frameless, always-on-top, click-through window and
 // brokers all privileged operations (window move/position, cursor, work area,
 // context menu) to the sandboxed renderer over IPC.
@@ -21,7 +21,7 @@ const fs = require('fs');
 const http = require('http');
 const { execFile, spawn } = require('child_process');
 
-// Only one 多吉 at a time: a second launch (double-clicking the .app while
+// Only one 河马 at a time: a second launch (double-clicking the .app while
 // it's already running, say) just exits, after nudging the first instance.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -55,13 +55,13 @@ const CLAUDE_PORT = 4319;
 const CHAT_W = 300;
 const CHAT_H = 400;
 
-// The dog's persona for Kimi conversations (section F). Prepended as the
+// The pet's persona for Kimi conversations (section F). Prepended as the
 // system message on every request.
 const PERSONA =
-  '你是住在 macOS 桌面右下角的像素柯基桌宠，名字叫「多吉」——主人给你起的，' +
+  '你是住在 macOS 桌面右下角的像素河马桌宠，名字叫「河马」（英文 Hema）——主人给你起的，' +
   '你也这样自称。性格活泼、粘人、有点小机灵。' +
-  '用中文口语回复，简短（一般不超过三句），偶尔带一声「汪！」或可爱的语气词。' +
-  '你会的本领：听主人说话（语音）、被主人拖来拖去、眼睛跟着鼠标转、' +
+  '用中文口语回复，简短（一般不超过三句），偶尔带可爱的语气词。' +
+  '你会的本领：听主人说话（语音）、被主人拖来拖去、' +
   '显示 Claude Code 任务进度、接住拖给你的文件帮主人打开终端、' +
   '翻主人的 Obsidian 笔记帮忙回忆和回答。' +
   '铁规矩：只有当消息里真的附了「主人的笔记片段」时，才能提到笔记内容，' +
@@ -74,7 +74,7 @@ const PERSONA =
 const STT_PROMPT =
   '请把这段语音逐字转写成简体中文文字。只输出转写结果本身，' +
   '不要任何解释、引号或前后缀；语音里夹杂的英文按原样保留。' +
-  '热词提示：说话人养的桌面宠物狗叫「多吉」，听到相近发音时优先写作「多吉」。';
+  '热词提示：说话人养的桌面宠物叫「河马」，听到相近发音时优先写作「河马」。';
 
 /** @type {BrowserWindow|null} */
 let win = null;
@@ -101,7 +101,7 @@ let isPaused = false;
 let claudeServer = null;
 
 // Cursor polling: feed the renderer the global cursor position so the resting
-// dog's eyes can track it. setInterval id (cleared on window close).
+// pet's eyes can track it. setInterval id (cleared on window close).
 let cursorTimer = null;
 // Last position we pushed; skip identical sends to keep IPC quiet.
 let lastSentCursor = { x: null, y: null };
@@ -135,7 +135,7 @@ function createWindow() {
 
   // Start fully click-through. `forward:true` keeps mousemove events flowing to
   // the renderer so it can run the pixel-perfect hover hit-test and toggle this
-  // back off when the cursor is genuinely over the dog's body.
+  // back off when the cursor is genuinely over the pet's body.
   win.setIgnoreMouseEvents(true, { forward: true });
 
   // Initial position: bottom-right of the primary display's work area.
@@ -231,7 +231,7 @@ ipcMain.on('show-menu', () => {
   if (!win) return;
   const menu = Menu.buildFromTemplate([
     {
-      label: '💬 和多吉聊天',
+      label: '和河马聊天',
       click: () => openChat(),
     },
     {
@@ -242,13 +242,13 @@ ipcMain.on('show-menu', () => {
       },
     },
     {
-      label: '🎙 语音唤醒（喊「多吉多吉」）',
+      label: '语音唤醒（喊「河马河马」）',
       type: 'checkbox',
       checked: wakeOn,
       click: (item) => setWakeEnabled(item.checked, true),
     },
     {
-      label: '⚙️ 设置',
+      label: '设置',
       click: () => openSettings(),
     },
     // Login-item control only makes sense for the packaged .app (in dev it
@@ -275,7 +275,7 @@ ipcMain.on('show-menu', () => {
 
 ipcMain.on('quit', () => app.quit());
 
-// Drop a file/folder on the dog → open Terminal.app in that directory running
+// Drop a file/folder on the pet → open Terminal.app in that directory running
 // `claude` (section E). All failures are caught and logged; the pet never crashes.
 ipcMain.on('open-in-claude', (_e, p) => {
   try {
@@ -438,7 +438,7 @@ function preferredConfigPath() {
   return app.isPackaged ? CONFIG_PATHS[0] : CONFIG_PATHS[1];
 }
 
-// 「⚙️ 设置」面板里的"高级 → 打开文件"按钮会调到这里。
+// 「设置」面板里的"高级 → 打开文件"按钮会调到这里。
 // 优先打开已存在的 config.json；都不存在时从 example 拷一份再打开，
 // 避免用户对着空文件干瞪眼。
 function openConfigFile() {
@@ -761,10 +761,10 @@ function createChatWindow() {
   });
 }
 
-// Show the chat panel anchored to the pet: right-aligned with the dog, sitting
+// Show the chat panel anchored to the pet: right-aligned with the pet, sitting
 // just above it, clamped into the work area.
 function openChat() {
-  // 没真 API Key 直接改弹设置——朋友双击 / 按 ⌥Space / 喊「多吉多吉」时
+  // 没真 API Key 直接改弹设置——朋友双击 / 按 ⌥Space / 喊「河马河马」时
   // 就不用先看到一个聊天窗、再被错误信息推去设置。一步直达。
   if (!looksLikeRealKey(loadKimiConfig().apiKey)) {
     openSettings();
@@ -1022,7 +1022,7 @@ function startClaudeServer() {
             // Native notification on task completion.
             if (event === 'Stop' && Notification.isSupported()) {
               const proj = cwd ? path.basename(cwd) : 'Claude Code';
-              new Notification({ title: '✅ 任务完成', body: proj }).show();
+              new Notification({ title: '任务完成', body: proj }).show();
             } else if (event === 'Notification' && Notification.isSupported()) {
               new Notification({
                 title: 'Claude Code',
@@ -1071,7 +1071,7 @@ function startClaudeServer() {
 // Solution: a tiny helper process watches the global drag pasteboard's
 // changeCount plus the left-button state. While ANY file drag is in flight
 // anywhere on the machine, an invisible, never-ignoring "drop catcher" window
-// (the exact recipe verified to receive drags) is shown at the dog's bounds to
+// (the exact recipe verified to receive drags) is shown at the pet's bounds to
 // catch the drop; the pet renderer is told to keep itself ignoring so the
 // catcher (at a lower window level) is what macOS targets. The catcher relays
 // hover (📂 cue) and the dropped path (eat + Terminal). On release it hides
@@ -1197,7 +1197,7 @@ ipcMain.on('catcher-drop', (_e, p) => {
   if (dropCatcher) dropCatcher.hide();
 });
 
-// ---- Wake word "多吉多吉" (section H) ----------------------------------------
+// ---- Wake word "河马河马" (section H) ----------------------------------------
 //
 // A hidden listener window captures the mic and streams 16 kHz mono PCM here;
 // the sherpa-onnx engine (kws.js) spots the wake phrase fully on-device. On a
@@ -1265,7 +1265,7 @@ ipcMain.on('wake-ready', (_e, info) => {
 });
 
 // Chat renderer signals the wake-triggered question is finished recording →
-// resume listening for the next "多吉多吉".
+// resume listening for the next "河马河马".
 ipcMain.on('wake-done', () => {
   wakeConversation = false;
   if (wakeOn && listenerWin) listenerWin.webContents.send('wake-pause', false);
@@ -1401,10 +1401,10 @@ app.whenReady().then(() => {
   }
   // Bring up the Claude Code hook listener (best-effort; never blocks the pet).
   startClaudeServer();
-  // Drop catcher + system-drag watcher: file drops onto the dog (section E).
+  // Drop catcher + system-drag watcher: file drops onto the pet (section E).
   createDropCatcher();
   startDragWatcher();
-  // Keep the catcher glued to the dog if it wanders mid-drag.
+  // Keep the catcher glued to the pet if it wanders mid-drag.
   win.on('move', () => {
     if (systemDragActive && dropCatcher && win) {
       dropCatcher.setBounds(win.getBounds());
@@ -1436,7 +1436,7 @@ app.whenReady().then(() => {
   createChatWindow();
 
   // Wake word (section H): hidden listener + offline spotter. Honors the
-  // saved on/off; defaults on (the user asked for always-on "多吉多吉").
+  // saved on/off; defaults on (the user asked for always-on "河马河马").
   createListenerWindow();
   const { wakeEnabled } = loadKimiConfig();
   setWakeEnabled(wakeEnabled, false);

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('chat', {
   hide: () => ipcRenderer.send('chat-hide'),
   // Push-to-talk: main fires this when the global hotkey is pressed.
   onPTT: (cb) => ipcRenderer.on('ptt-down', () => cb()),
-  // Wake word (section H): main fires this after detecting "多吉多吉" — start
+  // Wake word (section H): main fires this after detecting "河马河马" — start
   // recording the question with voice-activity auto-send.
   onWakeListen: (cb) => ipcRenderer.on('wake-listen', () => cb()),
   // Tell main the wake-triggered question is done recording → resume listening.

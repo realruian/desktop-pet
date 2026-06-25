@@ -131,7 +131,7 @@ body {
   border-bottom-right-radius: 4px;
 }
 
-.msg.dog {
+.msg.pet {
   align-self: flex-start;
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.94);
@@ -146,7 +146,7 @@ body {
   font-size: 12px;
 }
 
-/* Typing indicator: three pulsing dots while the dog "thinks". */
+/* Typing indicator: three pulsing dots while the pet "thinks". */
 
 .msg.typing {
   display: inline-flex;
@@ -267,8 +267,17 @@ body {
   border-radius: 10px;
   background: #5c87e8;
   color: #fff;
-  font-size: 15px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* IconPark up：16px 在 30px 蓝底按钮里留白舒适，stroke 跟 color 走白 */
+#send svg {
+  width: 16px;
+  height: 16px;
 }
 
 #send:hover {

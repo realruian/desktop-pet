@@ -35,7 +35,7 @@ function addBubble(cls, text) {
 
 function addTyping() {
   const div = document.createElement('div');
-  div.className = 'msg dog typing';
+  div.className = 'msg pet typing';
   div.innerHTML = '<i></i><i></i><i></i>';
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -43,15 +43,15 @@ function addTyping() {
 }
 
 // 本地欢迎气泡（不走 API），首次打开时让面板有人气
-const GREETING = '汪！我是多吉 🐶 打字或者按下面的话筒跟我说话都行～';
-addBubble('dog', GREETING);
+const GREETING = '我是河马，打字或者按下面的话筒跟我说话都行～';
+addBubble('pet', GREETING);
 
 // 清空对话：清掉历史和气泡，重新放一句欢迎，回到刚开聊的状态。
 // 不弹确认——会话内是临时聊天、关掉聊天窗也不持久化，不是高风险操作。
 function clearConversation() {
   history.length = 0;
   messagesEl.innerHTML = '';
-  addBubble('dog', GREETING);
+  addBubble('pet', GREETING);
   inputEl.focus();
 }
 clearEl.addEventListener('click', clearConversation);
@@ -88,7 +88,7 @@ async function sendMessage(textOverride) {
   if (res && res.ok) {
     // The model occasionally slips in markdown bold; bubbles are plain text,
     // so strip the markers for display (history keeps the original).
-    addBubble('dog', res.content.replace(/\*\*(.+?)\*\*/g, '$1'));
+    addBubble('pet', res.content.replace(/\*\*(.+?)\*\*/g, '$1'));
     history.push({ role: 'assistant', content: res.content });
   } else {
     // Errors render as a distinct bubble and are NOT added to history, so a
@@ -108,12 +108,12 @@ function autosize() {
 //
 // Click 🎤 to record, click again to stop. The webm/opus recording is decoded,
 // resampled to 16 kHz mono, WAV-encoded, then transcribed in main; the
-// transcript flows through sendMessage like a typed message — 多吉 replies in
+// transcript flows through sendMessage like a typed message — 河马 replies in
 // a normal text bubble.
 
 const REC_MAX_MS = 60 * 1000; // safety cap per recording
-const PLACEHOLDER_IDLE = '跟多吉说点什么…';
-const PLACEHOLDER_PTT = '多吉在听…松开按键自动发送';
+const PLACEHOLDER_IDLE = '跟河马说点什么…';
+const PLACEHOLDER_PTT = '河马在听…松开按键自动发送';
 let rec = null; // active MediaRecorder (null = not recording)
 let recChunks = [];
 let recStream = null;
@@ -143,7 +143,6 @@ async function toggleRecording() {
   rec.onstop = onRecordingStop;
   rec.start();
   micEl.classList.add('recording');
-  micEl.textContent = '■';
   if (pttActive) inputEl.placeholder = PLACEHOLDER_PTT;
   recTimer = setTimeout(() => rec && rec.stop(), REC_MAX_MS);
 }
@@ -152,14 +151,13 @@ async function onRecordingStop() {
   clearTimeout(recTimer);
   pttActive = false;
   // Wake-listen teardown: stop the VAD monitor and let main resume listening
-  // for the next "多吉多吉". A silent no-speech timeout finishes quietly (no
+  // for the next "河马河马". A silent no-speech timeout finishes quietly (no
   // error bubble) — the user said the wake word but then nothing.
   const wasWake = wakeActive;
   wakeActive = false;
   stopVAD();
   if (wasWake) window.chat.wakeDone();
   micEl.classList.remove('recording');
-  micEl.textContent = '🎤';
   inputEl.placeholder = PLACEHOLDER_IDLE;
   if (recStream) recStream.getTracks().forEach((t) => t.stop());
   recStream = null;
@@ -257,7 +255,7 @@ window.addEventListener('keyup', () => {
   if (pttActive && rec) rec.stop();
 });
 
-// ---- Wake word "多吉多吉" → voice-activity auto-send (section H) -------------
+// ---- Wake word "河马河马" → voice-activity auto-send (section H) -------------
 //
 // After main detects the wake phrase it pops the panel and fires this. There's
 // no key to release, so we record with a simple energy-based VAD: once the
@@ -267,22 +265,22 @@ const WAKE_SILENCE_MS = 1200; // trailing silence that ends the utterance
 const WAKE_NOSPEECH_MS = 4000; // give up if the user says nothing
 const WAKE_MAX_MS = 12000; // hard cap on a single question
 const WAKE_RMS_GATE = 0.018; // speech-vs-silence energy threshold
-const PLACEHOLDER_WAKE = '多吉在听…说完自动发送';
+const PLACEHOLDER_WAKE = '河马在听…说完自动发送';
 let wakeActive = false;
 let vad = null; // { timer, ctx } while a VAD monitor runs
 
-// A random little greeting the dog pops the moment it's woken — pure flavor,
+// A random little greeting the pet pops the moment it's woken — pure flavor,
 // shown as a display-only bubble (NOT pushed to history, so it never muddles
 // the actual question→answer the model sees).
 const WAKE_GREETINGS = [
   '主人，你终于想起我了！',
-  '汪！我在我在，说吧～',
-  '主人找我啦？耳朵都竖起来咯！',
+  '我在我在，说吧～',
+  '主人找我啦？',
   '哎，等你好久啦～说说看？',
-  '汪汪！这就来，听着呢～',
+  '这就来，听着呢～',
   '雷达一直给你开着呢，请讲！',
   '是不是想我了？嘿嘿，说吧～',
-  '主人召唤，多吉到！',
+  '主人召唤，河马到！',
 ];
 
 window.chat.onWakeListen(() => {
@@ -290,7 +288,7 @@ window.chat.onWakeListen(() => {
   wakeActive = true;
   // Bark fires first (pet window); let it lead, then pop the greeting bubble.
   const greeting = WAKE_GREETINGS[Math.floor(Math.random() * WAKE_GREETINGS.length)];
-  setTimeout(() => addBubble('dog', greeting), 400);
+  setTimeout(() => addBubble('pet', greeting), 400);
   startWakeRecording();
 });
 
@@ -313,7 +311,6 @@ async function startWakeRecording() {
   rec.onstop = onRecordingStop;
   rec.start();
   micEl.classList.add('recording');
-  micEl.textContent = '■';
   inputEl.placeholder = PLACEHOLDER_WAKE;
   recTimer = setTimeout(() => rec && rec.stop(), WAKE_MAX_MS);
   startVAD(recStream);

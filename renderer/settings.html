@@ -7,17 +7,35 @@
       content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
     />
     <link rel="stylesheet" href="settings.css" />
-    <title>多吉设置</title>
+    <title>河马设置</title>
   </head>
   <body>
     <div id="panel">
       <header id="titlebar">
-        <span id="title">⚙️ 多吉设置</span>
-        <button id="close" title="关闭">✕</button>
+        <span id="title">河马设置</span>
+        <!-- IconPark / Character / close-small：关闭 -->
+        <button id="close" title="关闭" aria-label="关闭">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path
+              d="M14 14L34 34"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M14 34L34 14"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </header>
       <main id="form">
         <div id="welcome" hidden>
-          🐶 你好！填一下 API Key 我们就能开始聊天了。
+          你好！填一下 API Key 我们就能开始聊天了。
         </div>
         <label class="field">
           <span class="label">API Key <em>必填</em></span>
@@ -29,7 +47,18 @@
               spellcheck="false"
               placeholder="sk-or-... 或 sk-..."
             />
-            <button id="toggleKey" type="button" title="显示/隐藏">👁</button>
+            <!-- IconPark / Base / preview-open：显示/隐藏密码（JS 切换图标）-->
+            <button id="toggleKey" type="button" title="显示/隐藏" aria-label="显示或隐藏密码">
+              <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path
+                  d="M24 12C13 12 5 24 5 24C5 24 13 36 24 36C35 36 43 24 43 24C43 24 35 12 24 12Z"
+                  stroke="currentColor"
+                  stroke-width="4"
+                  stroke-linejoin="round"
+                />
+                <circle cx="24" cy="24" r="6" stroke="currentColor" stroke-width="4" />
+              </svg>
+            </button>
           </div>
           <span class="hint"
             >OpenRouter（sk-or- 开头）或 Moonshot 直连都行。Key 只存在你电脑本地</span
@@ -69,7 +98,17 @@
               spellcheck="false"
               placeholder="/Users/.../你的库"
             />
-            <button id="pickVault" type="button" title="选择文件夹">…</button>
+            <!-- IconPark / Office / folder-close：选择文件夹 -->
+            <button id="pickVault" type="button" title="选择文件夹" aria-label="选择文件夹">
+              <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path
+                  d="M5 8H22L26 14H43V40H5V8Z"
+                  stroke="currentColor"
+                  stroke-width="4"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
           </div>
           <span class="hint"
             >填了就会本地检索笔记作为参考；留空跳过</span
