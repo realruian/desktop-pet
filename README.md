@@ -64,23 +64,35 @@
 
 ## 如何运行
 
-### 日常使用：独立 App（推荐）
+> **环境要求**：macOS（Apple Silicon 或 Intel 都行）+ [Node.js](https://nodejs.org)（18 及以上）。先装好 Node 再继续。
+
+### 第一次：拿到代码
 
 ```bash
-npm install
-npm run pack     # 打包出 dist/多吉-darwin-arm64/多吉.app
-cp -R dist/多吉-darwin-arm64/多吉.app /Applications/
+git clone https://github.com/chusimin/desktop-pet.git
+cd desktop-pet
+npm install        # 装依赖（Electron + 离线唤醒引擎，按你的芯片自动拉对应版本）
+```
+
+### 日常使用：打包成独立 App（推荐）
+
+```bash
+npm run pack                              # 按当前芯片打包出 dist/多吉-darwin-*/多吉.app
+cp -R dist/多吉-darwin-*/多吉.app /Applications/
 ```
 
 之后**双击「多吉」即可启动**；首次启动会自动注册**开机自启**（右键多吉 → 取消勾选「开机自启」可关闭）。App 不占 Dock、不进 ⌘Tab（LSUIElement），同时只会运行一个实例。新 App 首次用麦克风 / 弹通知 / 开终端时，macOS 会各弹一次授权。
 
+> 🔓 **首次打开提示「无法验证开发者」**：因为这是你本地自己打的包、没做苹果签名。**右键多吉 →「打开」→ 再点「打开」** 即可（只需一次）。
+>
+> 🐶 **不填 Key 也能用**：休息走动、眼睛跟随、拖动、状态胶囊这些不需要任何配置就能玩；只有「聊天 / 语音问答 / 笔记问答」需要你自己的 API Key（见下方「开启 Kimi 聊天」）。
+
 ### 开发调试
 
-需要 macOS + Node.js。
+想边改边看（不打包、直接跑源码）：
 
 ```bash
-npm install      # 安装依赖（Electron）
-npm start        # 启动桌宠（等价于 electron .）
+npm start        # 启动桌宠（等价于 electron .，依赖已在上面装过）
 ```
 
 启动后柯基出现在主屏**右下角**。退出：**右键 → 退出**。
