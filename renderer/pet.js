@@ -1,4 +1,4 @@
-// pet.js — animation engine + behavior state machine for the corgi.
+// pet.js — animation engine + behavior state machine for the hema.
 //
 // Responsibilities:
 //   1. Preload all sprite frames, then drive a requestAnimationFrame render loop.
@@ -7,9 +7,9 @@
 //   3. Pixel-perfect click-through: toggle window mouse-ignore based on whether
 //      the cursor is over an opaque body pixel.
 //   4. Manual 1:1 dragging via Pointer Events (main process moves the window).
-//   5. A phase-based behavior state machine: the dog RESTs ~half the time (eyes
+//   5. A phase-based behavior state machine: the pet RESTs ~half the time (eyes
 //      tracking the cursor + subtle breathing), punctuated by short bursts of
-//      activity (walk / scratch / bark / roll).
+//      activity (walk / scratch / wave / roll).
 
 'use strict';
 
@@ -17,17 +17,17 @@
 
 const WIN = 160; // window + canvas size (square), matches main.js
 const SRC = 420; // source frame size (px)
-// The dog is drawn smaller than the window, anchored bottom-center — the spare
+// The pet is drawn smaller than the window, anchored bottom-center — the spare
 // headroom hosts the status chip, and the (transparent) window never shows.
-const DOG = 120; // drawn dog size (px)
-const DOG_X = (WIN - DOG) / 2; // dog draw origin inside the canvas
-const DOG_Y = WIN - DOG;
+const PET = 120; // drawn pet size (px)
+const PET_X = (WIN - PET) / 2; // pet draw origin inside the canvas
+const PET_Y = WIN - PET;
 const WALK_SPEED = 130; // px/s while walking
 
-// Autonomous wandering. true = the dog takes short strolls NEAR ITS HOME spot
+// Autonomous wandering. true = the pet takes short strolls NEAR ITS HOME spot
 // and always walks back home before resting again, so it never drifts across
 // the screen. Strolls are strictly HORIZONTAL (the walk art is a side profile —
-// diagonal/vertical sliding looks wrong), so the dog paces left/right along its
+// diagonal/vertical sliding looks wrong), so the pet paces left/right along its
 // home's level. Dragging it somewhere makes that spot the new home. false =
 // strictly in-place activities only.
 const WANDER = true;
@@ -43,16 +43,16 @@ const REST_MIN = 6000; // min REST phase duration (ms)
 const REST_MAX = 12000; // max REST phase duration (ms)
 
 // Bond / expression unlocks. Time only counts while the user is actively
-// interacting with 多吉 (hovering over the body or dragging it around).
-const BOND_STORAGE_KEY = 'duoji.bond.v1';
+// interacting with 河马 (hovering over the body or dragging it around).
+const BOND_STORAGE_KEY = 'hema.bond.v1';
 const BOND_SAVE_EVERY_MS = 3000;
 const EXPRESSION_HOLD_LOOPS = 2;
 const EXPRESSION_UNLOCKS = [
-  { clip: 'tearful', label: '泪眼汪汪', thresholdMs: 60 * 1000 },
+  { clip: 'tearful', label: '泪眼婆娑', thresholdMs: 60 * 1000 },
   { clip: 'tearful2', label: '委屈巴巴', thresholdMs: 3 * 60 * 1000 },
   { clip: 'tearful3', label: '想贴贴', thresholdMs: 5 * 60 * 1000 },
   { clip: 'tearful4', label: '舍不得你', thresholdMs: 8 * 60 * 1000 },
-  { clip: 'bone', label: '啃骨头', thresholdMs: 10 * 60 * 1000 },
+  { clip: 'cheer', label: '美滋滋', thresholdMs: 10 * 60 * 1000 },
 ];
 
 // Breathing during REST: chest rises/falls, feet planted at the baseline.
@@ -60,11 +60,11 @@ const BREATH_AMT = 0.02; // ±2% vertical scale
 const BREATH_PERIOD = 3200; // ms per breath cycle
 const BASELINE = 388; // ground line in 420px source space (shared by all clips)
 
-// Eyes / gaze (REST): frames are NAMED by the direction the dog actually looks
+// Eyes / gaze (REST): frames are NAMED by the direction the pet actually looks
 // (from the source art), so we just match the cursor vector to the closest named
 // direction — no angle-sign guesswork. Vectors are in SCREEN coords (x right, y
 // DOWN). 'forward' (正视) when the cursor is near; 'nose' (看鼻子, cross-eyed)
-// when it's right on the dog's face. Down-right has no art frame → nearest wins.
+// when it's right on the pet's face. Down-right has no art frame → nearest wins.
 const GAZE_FADE = 0.12; // cross-fade duration on gaze change (s, ≈120ms)
 const GAZE_DIRS = [
   { name: 'right', dx: 1, dy: 0 },
@@ -77,7 +77,7 @@ const GAZE_DIRS = [
 ];
 const GAZE_FORWARD = 'forward';
 const GAZE_NOSE = 'nose';
-const GAZE_NEAR_PX = 75; // cursor within this of the dog's center → look 'forward'
+const GAZE_NEAR_PX = 75; // cursor within this of the pet's center → look 'forward'
 const GAZE_NOSE_PX = 30; // cursor this close (on the face) → cross-eyed 'nose'
 const EYES_FRAMES = [
   ...GAZE_DIRS.map((g) => g.name),
@@ -86,10 +86,10 @@ const EYES_FRAMES = [
 ];
 
 // Claude Code status layer (section D). While any session is live the
-// autonomous scheduler is paused and the dog holds an attentive REST (eyes
+// autonomous scheduler is paused and the pet holds an attentive REST (eyes
 // still track the cursor), with a small status chip floating above its head.
 //
-// Status chip: one compact row above the dog's head — [tiny DRAWN indicator]
+// Status chip: one compact row above the pet's head — [tiny DRAWN indicator]
 // [task label]. NO progress bar: Claude Code exposes no real percentage, so
 // the chip only claims what it actually knows — running (blue spinner),
 // needs you (amber pulse), finished (green check flash + a yip).
@@ -97,15 +97,15 @@ const EYES_FRAMES = [
 // Events arrive from EVERY Claude Code session on the machine (global hooks),
 // so state is tracked PER SESSION and the chip shows the merged picture:
 // any session waiting beats working; multiple running shows a ＋N suffix;
-// each completion flashes ✅ with that task's label (and a bark), then the
+// each completion flashes done with that task's label (and a wave), then the
 // chip returns to the remaining tasks or fades away.
 const CHIP_W = 92; // chip width (WIN-space px), centered above the head
-const CHIP_H = 16; // chip height (single row); the dog's crown is at y≈21
+const CHIP_H = 16; // chip height (single row); the pet's crown is at y≈21
 const CHIP_Y = 0; // chip top
 const CHIP_PAD = 7; // left/right inner padding
 const CHIP_LABEL_FONT = '9px -apple-system, "PingFang SC", system-ui, sans-serif';
 const CHIP_FADE_MS = 450; // chip fade-out once everything is done
-const DONE_FLASH_MS = 2200; // how long each task's ✅ flash holds
+const DONE_FLASH_MS = 2200; // how long each task's done flash holds
 const SESSION_STALE_MS = 15 * 60 * 1000; // forget sessions silent this long
 const CHIP_COLOR = {
   working: '#7aa2ff', // calm blue — running
@@ -118,9 +118,9 @@ const CHIP_COLOR = {
 const CLIPS = {
   walk: { fps: 10, frames: 8, faces: 'left' }, // side profile（河马向左走，向右自动翻转）
   scratch: { fps: 8, frames: 6, faces: 'front' }, // 河马：抱臂待机
-  bark: { fps: 9, frames: 4, faces: 'front' }, // 河马：挥手打招呼
+  wave: { fps: 9, frames: 4, faces: 'front' }, // 河马：挥手打招呼
   roll: { fps: 8, frames: 6, faces: 'front' }, // 河马：微笑转头卖萌
-  bone: { fps: 8, frames: 5, faces: 'front' }, // 河马：捂嘴欢呼（当作开心接食）
+  cheer: { fps: 8, frames: 5, faces: 'front' }, // 河马：捂嘴欢呼（当作开心接食）
   tearful: {
     fps: 1,
     frames: ['../assets/expressions/tearful.png'],
@@ -144,12 +144,12 @@ const CLIPS = {
 };
 
 // Weighted activity picks for an ACTIVE-phase burst. `walk` (the only activity
-// that moves the window) is included only when WANDER is on; otherwise the dog
+// that moves the window) is included only when WANDER is on; otherwise the pet
 // stays put and an active burst is just an in-place animation.
 const ACTIVITY_WEIGHTS = [
   ...(WANDER ? [{ name: 'walk', weight: 45 }] : []),
   { name: 'scratch', weight: 18 },
-  { name: 'bark', weight: 18 },
+  { name: 'wave', weight: 18 },
   { name: 'roll', weight: 19 },
 ];
 const EXPRESSION_WEIGHT = 10;
@@ -168,8 +168,8 @@ ctx.scale(dpr, dpr);
 ctx.imageSmoothingEnabled = false;
 
 // Baseline expressed in canvas draw coordinates (anchor for breathing), under
-// the DOG-sized, bottom-anchored placement.
-const BASELINE_WIN = DOG_Y + BASELINE * (DOG / SRC);
+// the PET-sized, bottom-anchored placement.
+const BASELINE_WIN = PET_Y + BASELINE * (PET / SRC);
 
 // ---- Sprite preloading ------------------------------------------------------
 
@@ -218,7 +218,7 @@ function loadAllFrames() {
 
 const state = {
   pos: { x: 0, y: 0 }, // window top-left in screen points
-  home: null, // the spot the dog lives at (returns here after strolls)
+  home: null, // the spot the pet lives at (returns here after strolls)
   facingRight: false, // art faces left; flip when true
   paused: false, // menu toggle
   dragging: false,
@@ -237,7 +237,7 @@ const state = {
 // Convenience: REST is the canonical idle, identified by the 'eyes' clip.
 const isResting = () => state.clipName === 'eyes';
 
-// True while any live Claude session holds the dog (scheduler paused). The
+// True while any live Claude session holds the pet (scheduler paused). The
 // done-flash is transient and does NOT count as a hold.
 const claudeHolding = () => claude.sessions.size > 0;
 
@@ -249,7 +249,7 @@ let walkTarget = null;
 let returningHome = false;
 
 // True while the screen is locked/asleep: the wander scheduler stands down so
-// the dog never roams against a stale work area (its position would otherwise
+// the pet never roams against a stale work area (its position would otherwise
 // be scrambled on wake). Main reconciles the real window position on wake.
 let powerSleep = false;
 
@@ -259,7 +259,7 @@ let powerSleep = false;
 // client coords by subtracting the window position rather than relying on
 // mousemove events, because macOS stops delivering mousemove during a system
 // drag session while the main process's cursor poll keeps flowing. That is what
-// lets a dragged file un-ignore the window and land on the dog (section E).
+// lets a dragged file un-ignore the window and land on the pet (section E).
 // -1 means "no sample yet" → look straight ahead (East).
 let latestCursor = { x: -1, y: -1 };
 
@@ -274,7 +274,7 @@ const claude = {
   display: 'idle', // derived: 'idle' | 'working' | 'waiting'
   taskLabel: '', // merged label shown while working/waiting
   taskExtra: 0, // how many MORE tasks are live beyond the labeled one (＋N)
-  doneUntil: 0, // performance.now() end of the current ✅ flash
+  doneUntil: 0, // performance.now() end of the current done flash
   doneLabel: '', // label shown during the flash
   holding: false, // scheduler-hold transition tracking
   resumeTimer: null, // setTimeout id resuming the scheduler after the last task
@@ -285,8 +285,8 @@ const unlockNotice = {
   label: '',
 };
 
-// True while a file/folder is being dragged over the dog (section E): show a
-// 📂 glyph and a tiny scale-up cue inviting the drop.
+// True while a file/folder is being dragged over the pet (section E): show a
+// folder glyph and a tiny scale-up cue inviting the drop.
 let dropHover = false;
 
 // True while ANY system file drag is in flight (fed by main's drag watcher).
@@ -313,7 +313,7 @@ const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 // Self-heal for corrupted coordinates (display changes / sleep-wake edges can
 // leave a NaN in flight): forget any in-progress motion, resync the position
 // from the real window, and settle back into REST. Main independently drops
-// non-finite move-to frames, so the dog can stutter but never crash.
+// non-finite move-to frames, so the pet can stutter but never crash.
 async function recoverPosition(reason) {
   console.warn('[pet] non-finite position (' + reason + '); resyncing');
   walkTarget = null;
@@ -426,14 +426,14 @@ function tickBond(dt, now) {
   saveBondState(now);
 }
 
-// Choose the gaze frame NAME by matching the dog→cursor vector to the closest
+// Choose the gaze frame NAME by matching the pet→cursor vector to the closest
 // named direction. Vectors are in screen coords (x right, y DOWN), so there is no
 // angle-sign ambiguity: we just pick the art frame that looks most toward the
-// cursor. Cursor on/near the dog → 'nose' (cross-eyed) / 'forward'.
+// cursor. Cursor on/near the pet → 'nose' (cross-eyed) / 'forward'.
 function gazeName() {
   if (latestCursor.x < 0) return GAZE_FORWARD; // no cursor sample yet
-  const centerX = state.pos.x + WIN / 2; // dog is horizontally centered
-  const centerY = state.pos.y + DOG_Y + DOG / 2; // visual center of the dog
+  const centerX = state.pos.x + WIN / 2; // pet is horizontally centered
+  const centerY = state.pos.y + PET_Y + PET / 2; // visual center of the pet
   const vx = latestCursor.x - centerX;
   const vy = latestCursor.y - centerY;
   const len = Math.hypot(vx, vy);
@@ -471,7 +471,7 @@ function isOverBody(cx, cy) {
 }
 
 // Re-evaluate click-through against the latest global cursor sample. Called on
-// every cursor poll tick, on pointermove, and every render frame (the dog can
+// every cursor poll tick, on pointermove, and every render frame (the pet can
 // move/breathe under a still cursor). Client coords are derived from the SCREEN
 // cursor minus the window position so the test keeps updating during system
 // drags, when no mouse events reach the window at all.
@@ -501,8 +501,8 @@ function drawClipFrame() {
     ctx.scale(-1, 1);
   }
   // Uniform anchoring: every clip shares the 420px baseline, so a straight
-  // 420→DOG scale keeps the dog grounded with no vertical "jump" between poses.
-  ctx.drawImage(img, 0, 0, src, src, DOG_X, DOG_Y, DOG, DOG);
+  // 420→PET scale keeps the pet grounded with no vertical "jump" between poses.
+  ctx.drawImage(img, 0, 0, src, src, PET_X, PET_Y, PET, PET);
   ctx.restore();
 }
 
@@ -536,11 +536,11 @@ function drawRest(now) {
   const curImg = eyes[gaze.cur];
   if (gaze.t < 1 && prevImg && prevImg.complete && prevImg.naturalWidth) {
     ctx.globalAlpha = 1;
-    ctx.drawImage(prevImg, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
+    ctx.drawImage(prevImg, 0, 0, SRC, SRC, PET_X, PET_Y, PET, PET);
   }
   if (curImg && curImg.complete && curImg.naturalWidth) {
     ctx.globalAlpha = Math.min(gaze.t, 1);
-    ctx.drawImage(curImg, 0, 0, SRC, SRC, DOG_X, DOG_Y, DOG, DOG);
+    ctx.drawImage(curImg, 0, 0, SRC, SRC, PET_X, PET_Y, PET, PET);
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -551,7 +551,7 @@ function drawFrame(now, dt) {
 
   // Drop-hover gives a tiny scale-up cue (section E), anchored at the ground
   // baseline so the feet stay planted. Baked into the canvas, so the hit-test
-  // (which samples after drawing) stays pixel-accurate against the larger dog.
+  // (which samples after drawing) stays pixel-accurate against the larger pet.
   const cueScale = dropHover ? 1.06 : 1;
   const scaled = cueScale !== 1;
   if (scaled) {
@@ -582,7 +582,7 @@ function ellipsize(text, maxW) {
   return text + '…';
 }
 
-// The status chip: one compact row above the dog's head — a small DRAWN
+// The status chip: one compact row above the pet's head — a small DRAWN
 // indicator (spinner / pulsing dot / check, crisp at a few px, no emoji)
 // followed by the task label and an optional ＋N more-tasks suffix.
 function drawStatusChip(now, alpha, mode, label, suffix) {
@@ -660,10 +660,10 @@ function drawStatusChip(now, alpha, mode, label, suffix) {
 }
 
 // Draw the status chip / drop cue as an OVERLAY, after the click-through
-// hit-test has already sampled the (chip-free) dog. Keeping the overlay out of
+// hit-test has already sampled the (chip-free) pet. Keeping the overlay out of
 // the hit-test means it never becomes draggable nor disturbs click-through.
 function drawOverlay(now) {
-  // Chip visibility: a fresh completion flashes ✅ (+ its task label) for
+  // Chip visibility: a fresh completion flashes done (+ its task label) for
   // DONE_FLASH_MS and takes precedence; otherwise working/waiting persist;
   // after the last task the flash fades the chip away; idle → nothing.
   let chipAlpha = 0;
@@ -695,14 +695,9 @@ function drawOverlay(now) {
   if (chipAlpha > 0.01 && mode)
     drawStatusChip(now, chipAlpha, mode, label, suffix);
 
-  // Drop-hover cue: a 📂 centered over the dog inviting the drop (section E).
+  // Drop-hover cue: a folder glyph centered over the pet inviting the drop (E).
   if (dropHover) {
-    ctx.save();
-    ctx.font = '30px system-ui, "Apple Color Emoji", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📂', WIN / 2, DOG_Y + DOG / 2);
-    ctx.restore();
+    drawGlyph('folder', WIN / 2, PET_Y + PET / 2, 34, 1);
   }
 
   // Eat animation: the dropped item's glyph accelerates into the mouth,
@@ -712,22 +707,17 @@ function drawOverlay(now) {
     if (t >= 1) {
       eat.active = false;
     } else {
-      const k = t * t; // ease-in: the dog sucks it in
+      const k = t * t; // ease-in: the pet sucks it in
       const mx = WIN / 2; // mouth, roughly mid-face on the front-facing clip
-      const my = DOG_Y + DOG * 0.5;
-      ctx.save();
-      ctx.globalAlpha = 1 - 0.3 * t;
-      ctx.font =
-        Math.max(4, 28 * (1 - 0.85 * k)) +
-        'px system-ui, "Apple Color Emoji", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(
+      const my = PET_Y + PET * 0.5;
+      const gsize = Math.max(6, 32 * (1 - 0.85 * k));
+      drawGlyph(
         eat.glyph,
         eat.from.x + (mx - eat.from.x) * k,
-        eat.from.y + (my - eat.from.y) * k
+        eat.from.y + (my - eat.from.y) * k,
+        gsize,
+        1 - 0.3 * t
       );
-      ctx.restore();
     }
   }
 }
@@ -778,7 +768,7 @@ function advanceAnimation(dt) {
     if (state.frame >= frameCount(state.clipName)) {
       state.frame = 0;
       state.loops++;
-      // In-place clips (scratch/bark/roll) end the activity once they've played
+      // In-place clips (scratch/wave/roll) end the activity once they've played
       // the requested loops. Walk is driven by arrival at its target instead, so
       // it ignores loopTarget here.
       if (state.loopTarget > 0 && state.clipName !== 'walk') {
@@ -818,7 +808,7 @@ function stepWalk(dt) {
 // ---- Behavior state machine (phase scheduler) -------------------------------
 //
 // Lifecycle: REST phase (rand REST_MIN..REST_MAX) → ACTIVE phase (1–2 weighted
-// activities back-to-back) → REST phase → … The dog therefore rests ~half its
+// activities back-to-back) → REST phase → … The pet therefore rests ~half its
 // time, in meaningful stretches rather than constant motion.
 
 function setClip(name, { loopTarget = 0 } = {}) {
@@ -840,7 +830,7 @@ function enterRest() {
 
 function scheduleActive() {
   clearTimeout(state.phaseTimer);
-  // Don't arm the scheduler while live Claude sessions own the dog (the
+  // Don't arm the scheduler while live Claude sessions own the pet (the
   // resume after the last task is driven by refreshClaude's resume timer).
   if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
   const delay = rand(REST_MIN, REST_MAX);
@@ -874,7 +864,7 @@ function runNextActivity() {
 }
 
 // One activity finished: run the next one, or wrap up the burst — walking back
-// home first if the strolls left the dog away from its spot, then REST.
+// home first if the strolls left the pet away from its spot, then REST.
 function onActivityDone() {
   if (state.paused || state.dragging) return;
   if (claudeHolding()) {
@@ -909,7 +899,7 @@ function returnHome() {
 
 function startWalk() {
   // Re-query the work area each walk so display/resolution changes are honored.
-  // getWorkArea is async; nothing else should drive the dog while we await it.
+  // getWorkArea is async; nothing else should drive the pet while we await it.
   window.pet.getWorkArea().then((wa) => {
     if (state.paused || powerSleep || state.dragging || claudeHolding()) return;
 
@@ -920,7 +910,7 @@ function startWalk() {
     const maxY = wa.y + wa.height - WIN;
 
     // Stroll target: HORIZONTAL only, anchored on HOME (not the current
-    // position, so consecutive walks can never drift the dog away). Pick the
+    // position, so consecutive walks can never drift the pet away). Pick the
     // side with room: near a screen edge, walk toward the open side.
     const home = state.home || state.pos;
     const reach = (d) => (d === 1 ? maxX - home.x : home.x - minX);
@@ -980,7 +970,7 @@ canvas.addEventListener('pointerdown', (e) => {
   currentlyInteractive = true;
   window.pet.setIgnore(false);
 
-  // Grab offset = cursor minus current window top-left, so the dog stays put
+  // Grab offset = cursor minus current window top-left, so the pet stays put
   // relative to the cursor for the duration of the drag. We read it
   // synchronously from our locally-tracked position (the window is only ever
   // moved by our own moveTo, so state.pos is authoritative) — avoiding an async
@@ -1017,11 +1007,11 @@ async function endDrag(e) {
   }
 
   if (!moved) {
-    // A tap (petting): the dog yips once as a one-off activity, then REST.
+    // A tap (petting): the pet yips once as a one-off activity, then REST.
     state.activitiesLeft = 1;
-    setClip('bark', { loopTarget: 1 });
+    setClip('wave', { loopTarget: 1 });
   } else {
-    // A real drag: wherever you put the dog down is its new home. Settle, then
+    // A real drag: wherever you put the pet down is its new home. Settle, then
     // resume the rest/active cycle after a short beat.
     state.home = { x: wx, y: wy };
     setClip('eyes');
@@ -1041,7 +1031,7 @@ canvas.addEventListener('contextmenu', (e) => {
 });
 
 // Double-click on the body → open the chat panel (section F). The first click
-// of the pair still pets the dog (a yip), which makes a nice greeting.
+// of the pair still pets the pet (a yip), which makes a nice greeting.
 canvas.addEventListener('dblclick', (e) => {
   if (!isOverBody(e.clientX, e.clientY)) return;
   window.pet.openChat();
@@ -1050,7 +1040,7 @@ canvas.addEventListener('dblclick', (e) => {
 // ---- File / folder drop → Terminal + Claude Code (section E) -----------------
 //
 // Globally swallow drags so the window never navigates to a dropped file. On
-// the canvas we light up a 📂 cue and, on drop, resolve the dropped path and ask
+// the canvas we light up a folder cue and, on drop, resolve the dropped path and ask
 // main to open Terminal there running `claude`. Dropping onto the opaque body
 // works because hovering the body has already turned click-through off.
 for (const evt of ['dragover', 'drop']) {
@@ -1066,7 +1056,7 @@ for (const evt of ['dragover', 'drop']) {
 canvas.addEventListener('dragover', (e) => {
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-  dropHover = true; // draw the 📂 glyph + scale-up cue
+  dropHover = true; // draw the folder glyph + scale-up cue
 });
 
 canvas.addEventListener('dragleave', () => {
@@ -1082,14 +1072,38 @@ canvas.addEventListener('drop', (e) => {
   if (p) eatAndOpen(p, { x: e.clientX, y: e.clientY });
 });
 
+// 在 canvas 上画一个线性图标（folder/file），替代原先的 emoji glyph，跟
+// 窗口里的 IconPark 线条语言统一。双描边（白底+深线）保证它在浅色桌宠身上
+// 任何部位都看得清。kind: 'folder' | 'file'，path 用 48 单位 viewBox。
+function drawGlyph(kind, cx, cy, size, alpha) {
+  const s = size / 48;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx - size / 2, cy - size / 2);
+  ctx.scale(s, s);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const paths =
+    kind === 'file'
+      ? [new Path2D('M14 6H30L38 16V42H14V6Z'), new Path2D('M30 6V16H38')]
+      : [new Path2D('M5 8H22L26 14H43V40H5V8Z')];
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = 7;
+  paths.forEach((p) => ctx.stroke(p));
+  ctx.strokeStyle = 'rgba(38,40,52,0.95)';
+  ctx.lineWidth = 3.5;
+  paths.forEach((p) => ctx.stroke(p));
+  ctx.restore();
+}
+
 // ---- "Eat" the drop ----------------------------------------------------------
 //
 // Feedback for a successful drop: the item's glyph flies from the drop point
-// into the dog's mouth while the bark clip plays as a chomp, then the normal
+// into the pet's mouth while the wave clip plays as a chomp, then the normal
 // wrap-up (walk home / rest / attentive eyes) takes over via onActivityDone.
 // The Terminal launch fires immediately — it spins up behind the animation.
 const EAT_FLY_MS = 460; // glyph flight time, drop point → mouth
-const eat = { active: false, t0: 0, from: null, glyph: '📂' };
+const eat = { active: false, t0: 0, from: null, glyph: 'folder' };
 
 function eatAndOpen(p, from) {
   window.pet.openInClaude(p);
@@ -1097,13 +1111,13 @@ function eatAndOpen(p, from) {
   // Folder vs file only picks the glyph; a dot-extension on the last path
   // segment is a good-enough tell without a round-trip to main.
   const base = p.split('/').pop() || '';
-  eat.glyph = /\.[^.]+$/.test(base) ? '📄' : '📂';
+  eat.glyph = /\.[^.]+$/.test(base) ? 'file' : 'folder';
   eat.active = true;
   eat.t0 = performance.now();
   eat.from =
     from && from.x != null
       ? { x: from.x, y: from.y }
-      : { x: WIN / 2, y: DOG_Y - 4 };
+      : { x: WIN / 2, y: PET_Y - 4 };
 
   // Chomp (same one-off shape as the tap yip, two loops for a real swallow).
   if (state.paused || state.dragging) return; // glyph only; don't fight a pause
@@ -1111,7 +1125,7 @@ function eatAndOpen(p, from) {
   walkTarget = null;
   returningHome = false;
   state.activitiesLeft = 1;
-  setClip('bark', { loopTarget: 2 });
+  setClip('wave', { loopTarget: 2 });
 }
 
 // ---- Menu commands from main ------------------------------------------------
@@ -1133,14 +1147,14 @@ window.pet.onMenuCommand((cmd) => {
 });
 
 // Global cursor feed (screen points) → aim the resting gaze AND re-test
-// click-through right away (the dog may move/breathe under a still cursor).
+// click-through right away (the pet may move/breathe under a still cursor).
 window.pet.onCursor((p) => {
   latestCursor = { x: p.x, y: p.y };
   updateInteractivity();
 });
 
 // System-drag mode (section E): while any file drag is in flight, an
-// invisible catcher window is shown at the dog's bounds to receive the drop
+// invisible catcher window is shown at the pet's bounds to receive the drop
 // (this window can't — macOS never delivers drag events to a window that has
 // ever been click-through-configured). The pet must keep IGNORING mouse
 // events for the whole drag so macOS targets the catcher beneath it; main
@@ -1154,7 +1168,7 @@ window.pet.onDragMode((on) => {
   }
 });
 
-// Catcher relays (section E): drag hover drives the 📂 cue; a dropped path
+// Catcher relays (section E): drag hover drives the folder cue; a dropped path
 // triggers the swallow + Terminal launch.
 window.pet.onDropHover((on) => {
   dropHover = !!on;
@@ -1164,8 +1178,8 @@ window.pet.onDropPath((p) => {
   eatAndOpen(p);
 });
 
-// Wake word "多吉多吉" heard (section H): a single attentive bark, same one-off
-// shape as the tap yip. The chat panel pops separately; this is just the dog
+// Wake word "河马河马" heard (section H): a single attentive wave, same one-off
+// shape as the tap yip. The chat panel pops separately; this is just the pet
 // perking up to say "I'm listening".
 window.pet.onWakeBark(() => {
   if (state.paused || state.dragging) return;
@@ -1173,7 +1187,7 @@ window.pet.onWakeBark(() => {
   walkTarget = null;
   returningHome = false;
   state.activitiesLeft = 1;
-  setClip('bark', { loopTarget: 1 });
+  setClip('wave', { loopTarget: 1 });
 });
 
 // Display sleep/wake reconcile (fixes the post-unlock position scramble): main
@@ -1227,14 +1241,14 @@ function enterClaudeHold() {
   if (!state.dragging) setClip('eyes'); // attentive REST; eyes track cursor
 }
 
-// A task finished: flash ✅ with its label and yip once. The chip/scheduler
+// A task finished: flash done with its label and yip once. The chip/scheduler
 // afterlife is handled by refreshClaude (other sessions may still be running).
 function fireClaudeDone(label) {
   claude.doneLabel = label || '任务完成';
   claude.doneUntil = performance.now() + DONE_FLASH_MS;
   if (!state.dragging && !state.paused) {
     state.activitiesLeft = 1; // a single celebratory yip
-    setClip('bark', { loopTarget: 1 });
+    setClip('wave', { loopTarget: 1 });
   }
 }
 
@@ -1266,7 +1280,7 @@ function refreshClaude() {
   }
 
   // Hold while sessions are live; resume once the last one is gone (after its
-  // ✅ flash has played out).
+  // done flash has played out).
   if (claudeHolding()) {
     if (!claude.holding) {
       claude.holding = true;
@@ -1339,7 +1353,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
       }
       break;
     case 'Stop':
-      // The turn finished → that task succeeded: ✅ flash + yip.
+      // The turn finished → that task succeeded: done flash + yip.
       claude.sessions.delete(sid);
       fireClaudeDone(s ? s.label : taskLabelFrom(prompt, cwd));
       break;
