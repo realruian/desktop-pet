@@ -37,6 +37,7 @@ const HOME_EPS = 8; // "close enough to home" — skip the walk back
 const ALPHA_THRESHOLD = 30; // alpha above this counts as "over the body"
 const TAP_SLOP = 4; // px of movement below which a press counts as a tap
 const RESUME_DELAY = 600; // ms to wait after a real drag before resting again
+const DRAG_FLIP_EPS = 1.5; // 拖动时水平位移超过这个值才翻转朝向，防抖动来回翻
 
 // Phase scheduler (v2): rest in meaningful stretches, then a short active burst.
 const REST_MIN = 6000; // min REST phase duration (ms)
@@ -999,9 +1000,19 @@ canvas.addEventListener('pointermove', (e) => {
 
   if (state.dragging) {
     // Track whether this gesture has exceeded the tap slop.
+    const wasMoved = moved;
     moved =
       moved ||
       dist(downScreen, { x: e.screenX, y: e.screenY }) > TAP_SLOP;
+    if (moved) {
+      // 确认是拖动（而非 tap）：第一次跨过阈值时切到「跑」姿态（running-left/right）。
+      // 只在上升沿 setClip 一次，否则每帧重置 frame 会让动画卡在第 0 帧。
+      // walkTarget 为 null + loopTarget=0 → 开放循环，拖多久跑多久。
+      if (!wasMoved) setClip('walk');
+      // 按水平移动方向更新朝向（小阈值防抖动来回翻）；纯垂直/微动保持上一次朝向。
+      if (e.movementX > DRAG_FLIP_EPS) state.facingRight = true;
+      else if (e.movementX < -DRAG_FLIP_EPS) state.facingRight = false;
+    }
     // Throttle the actual window move to the rAF loop for 1:1, jank-free drag.
     pendingMove = { x: e.screenX - grab.x, y: e.screenY - grab.y };
     return;
@@ -1059,9 +1070,11 @@ async function endDrag(e) {
   }
 
   // Live Claude sessions were held off while the user dragged (drag always
-  // wins). Re-project the attentive hold now instead of resuming the scheduler.
+  // wins). 落地后按当前合并状态恢复对应姿态（working→踏步，waiting→抱臂），
+  // 而不是停在 eyes，免得身体和头顶芯片对不上。调度器仍保持暂停。
   if (claudeHolding()) {
-    setClip('eyes'); // attentive REST; scheduler stays paused
+    claude.bodyDisplay = claude.display;
+    applyClaudeBody(claude.display);
     return;
   }
 
