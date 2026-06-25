@@ -1,9 +1,9 @@
-# Corgi Desktop Pet — Upgrade Spec (v2)
+# Hema Desktop Pet — Upgrade Spec (v2)
 
 Builds on the shipped v1 (see `SPEC.md`, `main.js`, `preload.js`, `renderer/*`). Four additions:
 1. **Rest ~50% of the time, with breathing** (less constant motion).
 2. **Eyes follow the mouse** while resting (new `assets/eyes/01..09.png`).
-3. **Drop a file/folder on the dog → open Terminal.app running Claude Code** there.
+3. **Drop a file/folder on the pet → open Terminal.app running Claude Code** there.
 4. **Live Claude Code status** via this project's hooks → pet reflects working/waiting/done.
 
 Keep all v1 invariants: transparent/frameless/always-on-top, pixel-perfect click-through,
@@ -15,28 +15,28 @@ canvas, uniform 420→WIN draw with shared baseline (no pose jumps).
 ## A. Behavior model v2 (rewrite the scheduler in `renderer/pet.js`)
 
 New canonical idle is **REST** (replaces the old plain `scratch[0]` idle):
-- **REST**: dog sits using the **eyes frames** (gaze tracks the cursor, section B) **plus
-  breathing** (section C). This is where the dog spends ~half its time.
-- **WALK / scratch / bark / roll**: unchanged clips, but driven by the new phase scheduler.
+- **REST**: pet sits using the **eyes frames** (gaze tracks the cursor, section B) **plus
+  breathing** (section C). This is where the pet spends ~half its time.
+- **WALK / scratch / wave / roll**: unchanged clips, but driven by the new phase scheduler.
 - **DRAG**: unchanged.
 
 **Phase scheduler (target ≈50% rest, in meaningful stretches):**
 - Enter **REST phase** for `rand(REST_MIN, REST_MAX)` ms (`REST_MIN=6000, REST_MAX=12000`).
 - Then an **ACTIVE phase**: perform `n` activities back-to-back, `n = Math.random()<0.4 ? 2 : 1`.
-  Each activity = weighted pick `walk 45 / scratch 18 / bark 18 / roll 19`.
+  Each activity = weighted pick `walk 45 / scratch 18 / wave 18 / roll 19`.
 - After the active phase's activities finish → back to REST phase. Repeat.
 - **Walk targets are capped** so bursts stay short: `|tx-pos.x| ≤ 0.45*wa.width`,
   `|ty-pos.y| ≤ 0.30*wa.height` (still clamped fully on-screen). Speed unchanged (~150px/s).
 - Menu "暂停走动" → force REST, stop the scheduler until resumed.
 - The Claude status (section D) can override: while WORKING/WAITING the scheduler is paused and
-  the dog stays in an attentive REST (eyes still track the cursor).
+  the pet stays in an attentive REST (eyes still track the cursor).
 
 ## B. Eyes follow mouse (`assets/eyes/01..09.png`, already prepared)
 
 9 front-facing gaze frames; body is pixel-identical, only pupils move. **Gaze map** (already
 derived): frame 01 = looking **East/right**, even ~40° steps around the circle:
 `frameIndex0 = ((Math.round(angleDeg / 40) % 9) + 9) % 9`  (0-based; file = `eyes/0{idx+1}.png`)
-where `angleDeg` is the screen direction from the dog to the cursor, **up = positive**:
+where `angleDeg` is the screen direction from the pet to the cursor, **up = positive**:
 `angleDeg = (atan2(-(cursorY - centerY), cursorX - centerX) * 180/PI + 360) % 360`,
 `centerX = pos.x + WIN/2`, `centerY = pos.y + WIN/2` (screen points).
 
@@ -71,13 +71,13 @@ each of `UserPromptSubmit`, `Notification`, `Stop`, `SubagentStop` forwards stdi
 `curl -s -m 1 -X POST http://127.0.0.1:4319/hook -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true`
 
 **Event → status → pet reaction** (renderer):
-- `UserPromptSubmit` → **WORKING**: pause scheduler, attentive REST, draw a small ⚙️ glyph (top-right of dog).
+- `UserPromptSubmit` → **WORKING**: pause scheduler, attentive REST, draw a small ⚙️ glyph (top-right of pet).
 - `Notification` → **WAITING**: attentive REST, draw ❗ glyph; (optional gentle native notification "Claude 在等你").
-- `Stop` → **DONE**: play `bark` once (a happy yip), draw ✅ glyph for ~1.5s, fire native
+- `Stop` → **DONE**: play `wave` once (a happy yip), draw ✅ glyph for ~1.5s, fire native
   `Notification{title:'✅ 任务完成', body: project basename of cwd}`; after ~4s clear status → resume scheduler.
 - `SubagentStop` → ignore (avoid noise).
-- Status glyphs: `ctx.fillText` emoji at ~22px near the dog's head; subtle. Clear when status returns to idle.
-- Precedence: DONE one-shot bark > WORKING/WAITING attentive hold > autonomous scheduler.
+- Status glyphs: `ctx.fillText` emoji at ~22px near the pet's head; subtle. Clear when status returns to idle.
+- Precedence: DONE one-shot wave > WORKING/WAITING attentive hold > autonomous scheduler.
 
 **Notes:** hooks live in THIS project, so they also fire for the Claude Code session building this —
 that's fine and is a live self-test. Connection-refused returns instantly (no latency) when the pet is down.

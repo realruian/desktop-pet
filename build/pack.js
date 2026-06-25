@@ -1,4 +1,4 @@
-// build/pack.js — package 多吉.app (@electron/packager, programmatic).
+// build/pack.js — package 河马.app (@electron/packager, programmatic).
 //
 // Why a script and not a one-line CLI: the wake-word feature adds a native
 // module (sherpa-onnx-node + its .dylibs) and the KWS model files, all of which
@@ -20,12 +20,12 @@ const ARCH = process.arch === 'x64' ? 'x64' : 'arm64';
 (async () => {
   const appPaths = await packager({
     dir: ROOT,
-    name: '多吉',
+    name: '河马',
     platform: 'darwin',
     arch: ARCH,
     out: path.join(ROOT, 'dist'),
     overwrite: true,
-    appBundleId: 'com.simin.duoji',
+    appBundleId: 'com.simin.hema',
     extendInfo: path.join(ROOT, 'build', 'extend.plist'),
     asar: {
       // Native binaries (.node + onnxruntime/sherpa .dylib) must be on disk and
@@ -50,7 +50,7 @@ const ARCH = process.arch === 'x64' ? 'x64' : 'arm64';
     ],
   });
 
-  const appBundle = path.join(appPaths[0], '多吉.app');
+  const appBundle = path.join(appPaths[0], '河马.app');
   const resources = path.join(appBundle, 'Contents', 'Resources');
 
   // packager's --icon silently fails for us; overwriting electron.icns is the

@@ -1,7 +1,7 @@
 {
-  "name": "corgi-desktop-pet",
+  "name": "hema-desktop-pet",
   "version": "0.1.0",
-  "description": "A cute pixel corgi desktop pet for macOS (Electron): draggable, wanders randomly, transparent click-through window.",
+  "description": "A cute pixel Hema (hippo) desktop pet for macOS (Electron): draggable, wanders randomly, transparent click-through window.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

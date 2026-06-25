@@ -1,14 +1,14 @@
-# Corgi Desktop Pet — Implementation Spec
+# Hema Desktop Pet — Implementation Spec
 
-A macOS Electron desktop pet: a pixel-art corgi that sits, **wanders randomly**, and is
+A macOS Electron desktop pet: a pixel-art hema that sits, **wanders randomly**, and is
 **draggable**. The window is transparent, frameless, always-on-top, and click-through
-everywhere **except** the dog's body (pixel-perfect).
+everywhere **except** the pet's body (pixel-perfect).
 
 ## Assets (already prepared — do NOT regenerate)
-All normalized to a **420×420** canvas, dog grounded at baseline **y=388**, same pixel scale:
+All normalized to a **420×420** canvas, pet grounded at baseline **y=388**, same pixel scale:
 - `assets/walk/01.png … 09.png` — walking, **art faces LEFT** (side profile)
 - `assets/scratch/01.png … 09.png` — sitting/scratching, faces front. `scratch/01.png` = idle resting pose
-- `assets/bark/01.png … 09.png` — barking, faces front
+- `assets/wave/01.png … 09.png` — waving, faces front
 - `assets/roll/01.png … 09.png` — rolling on back, on the floor
 
 ## Files to create
@@ -22,8 +22,8 @@ All normalized to a **420×420** canvas, dog grounded at baseline **y=388**, sam
 - `WIN = 200` — window is `WIN×WIN` (square). Canvas drawn at this size.
 - Source frames are 420px; draw scaled to `WIN` with smoothing OFF (crisp pixel art).
 - Walk speed ≈ `150` px/s. Idle pause between behaviors: random `2500–6000` ms.
-- Frame rates: walk 10 fps, scratch 8 fps, bark 9 fps, roll 8 fps.
-- Behavior pick weights from IDLE: walk 55, scratch 15, bark 15, roll 15.
+- Frame rates: walk 10 fps, scratch 8 fps, wave 9 fps, roll 8 fps.
+- Behavior pick weights from IDLE: walk 55, scratch 15, wave 15, roll 15.
 
 ## main.js
 - `BrowserWindow`: `width:WIN, height:WIN, transparent:true, frame:false, resizable:false,`
@@ -76,7 +76,7 @@ quit()                       -> ipcRenderer.send('quit')
 - Render loop with `requestAnimationFrame`: advance the current clip's frame by elapsed time vs its fps.
   Draw current frame scaled from 420→WIN, applying current facing flip.
 - After drawing each frame, re-run the hover hit-test using the **last known cursor position**
-  (so click-through toggles correctly as the dog animates/moves under a stationary cursor).
+  (so click-through toggles correctly as the pet animates/moves under a stationary cursor).
 
 ## pet.js — click-through hit test (pixel-perfect)
 - Track `lastCursor` from `pointermove` (clientX/clientY relative to canvas rect).
@@ -86,7 +86,7 @@ quit()                       -> ipcRenderer.send('quit')
 - On every `pointermove` (these are forwarded even while ignoring): update `lastCursor`,
   compute `over = isOverBody(...)`. If `!dragging`: if `over !== currentlyInteractive` →
   `pet.setIgnore(!over)` and update `currentlyInteractive`. (Debounce: only call on change.)
-- Re-evaluate the same toggle each animation frame using `lastCursor` (dog may move under cursor).
+- Re-evaluate the same toggle each animation frame using `lastCursor` (pet may move under cursor).
 
 ## pet.js — dragging (manual, main moves the window)
 - Use Pointer Events on `window`/canvas.
@@ -99,7 +99,7 @@ quit()                       -> ipcRenderer.send('quit')
   in the render loop, if `pending` → `pet.moveTo(pending.x,pending.y)`, update local `pos`, clear.
   (`screenX/screenY` are global screen coords in points = same space as `win.setPosition`.)
 - `pointerup`: release capture; `dragging=false`; sync `pos = await pet.getPos()`.
-  If `!moved` → it was a **tap**: play `bark` once (dog yips when petted), then idle.
+  If `!moved` → it was a **tap**: play `wave` once (pet yips when petted), then idle.
   Else resume normal behavior after ~600ms (return to IDLE).
 
 ## pet.js — behavior state machine
@@ -113,7 +113,7 @@ Local state: `pos {x,y}` (window top-left, in screen points), `facingRight`, `pa
     (mostly-horizontal, slight vertical drift — looks natural for side-view walk).
     `facingRight = (tx > pos.x)`. Play walk clip looped; each rAF tick move `pos` toward target by
     `speed*dt` along the normalized vector; when within ~3px → snap to target → IDLE.
-  - **scratch / bark / roll**: play that clip in place for 1–2 loops → IDLE.
+  - **scratch / wave / roll**: play that clip in place for 1–2 loops → IDLE.
 - **paused** (menu toggle): force IDLE, no scheduling, until resumed.
 - Re-query `getWorkArea()` at the start of each walk (handles display/resolution changes).
 
