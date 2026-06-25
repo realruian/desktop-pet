@@ -1541,7 +1541,7 @@ function startTestBridge() {
           // drag-destination behavior can be tested without a human hand.
           const { nativeImage } = require('electron');
           const icon = nativeImage
-            .createFromPath(path.join(__dirname, 'assets', 'eyes', 'forward.png'))
+            .createFromPath(path.join(__dirname, 'assets', 'scratch', '01.png'))
             .resize({ width: 24 });
           w.webContents.startDrag({ file: js, icon });
           res.end(JSON.stringify({ ok: true }));

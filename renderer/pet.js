@@ -61,30 +61,11 @@ const BREATH_AMT = 0.02; // ±2% vertical scale
 const BREATH_PERIOD = 3200; // ms per breath cycle
 const BASELINE = 388; // ground line in 420px source space (shared by all clips)
 
-// Eyes / gaze (REST): frames are NAMED by the direction the pet actually looks
-// (from the source art), so we just match the cursor vector to the closest named
-// direction — no angle-sign guesswork. Vectors are in SCREEN coords (x right, y
-// DOWN). 'forward' (正视) when the cursor is near; 'nose' (看鼻子, cross-eyed)
-// when it's right on the pet's face. Down-right has no art frame → nearest wins.
-const GAZE_FADE = 0.12; // cross-fade duration on gaze change (s, ≈120ms)
-const GAZE_DIRS = [
-  { name: 'right', dx: 1, dy: 0 },
-  { name: 'upright', dx: 1, dy: -1 },
-  { name: 'up', dx: 0, dy: -1 },
-  { name: 'upleft', dx: -1, dy: -1 },
-  { name: 'left', dx: -1, dy: 0 },
-  { name: 'downleft', dx: -1, dy: 1 },
-  { name: 'down', dx: 0, dy: 1 },
-];
-const GAZE_FORWARD = 'forward';
-const GAZE_NOSE = 'nose';
-const GAZE_NEAR_PX = 75; // cursor within this of the pet's center → look 'forward'
-const GAZE_NOSE_PX = 30; // cursor this close (on the face) → cross-eyed 'nose'
-const EYES_FRAMES = [
-  ...GAZE_DIRS.map((g) => g.name),
-  GAZE_FORWARD,
-  GAZE_NOSE,
-];
+// REST idle: the pet holds a calm front-facing pose (the first 抱臂/scratch
+// frame) under a gentle breathing scale. Identified by the REST sentinel clip
+// name — it is NOT a real CLIPS entry, so the per-frame advance/draw paths skip
+// it and render it through drawRest() instead.
+const REST = 'rest';
 
 // Claude Code status layer (section D). While any session is live the
 // autonomous scheduler is paused and the pet holds an attentive REST (eyes
@@ -115,7 +96,7 @@ const CHIP_COLOR = {
 };
 
 // Animation clips: frame count + playback fps. Art faces LEFT by default.
-// (REST uses the separately-loaded, gaze-named `images.eyes` set — see below.)
+// (REST is not a clip — it holds scratch's first frame statically; see drawRest.)
 const CLIPS = {
   walk: { fps: 10, frames: 8, faces: 'left' }, // side profile（河马向左走，向右自动翻转）
   scratch: { fps: 8, frames: 6, faces: 'front' }, // 河马：抱臂待机
@@ -207,11 +188,6 @@ function loadAllFrames() {
       }
     }
   }
-  // REST gaze frames, keyed by direction name (images.eyes[name]).
-  images.eyes = {};
-  for (const name of EYES_FRAMES) {
-    images.eyes[name] = loadOne(`../assets/eyes/${name}.png`, tasks);
-  }
   return Promise.all(tasks);
 }
 
@@ -223,7 +199,7 @@ const state = {
   facingRight: false, // art faces left; flip when true
   paused: false, // menu toggle
   dragging: false,
-  clipName: 'eyes', // current animation clip ('eyes' === REST)
+  clipName: REST, // current clip; the REST sentinel marks the idle pose
   frame: 0, // current frame index within the clip
   loops: 0, // completed loops of the current clip
   loopTarget: 0, // loops to play before ending the activity (0 = open-ended)
@@ -235,8 +211,8 @@ const state = {
   lastBondSave: 0, // performance.now() of the last localStorage write
 };
 
-// Convenience: REST is the canonical idle, identified by the 'eyes' clip.
-const isResting = () => state.clipName === 'eyes';
+// Convenience: REST is the canonical idle, identified by the REST sentinel clip.
+const isResting = () => state.clipName === REST;
 
 // True while any live Claude session holds the pet (scheduler paused). The
 // done-flash is transient and does NOT count as a hold.
@@ -263,10 +239,6 @@ let powerSleep = false;
 // lets a dragged file un-ignore the window and land on the pet (section E).
 // -1 means "no sample yet" → look straight ahead (East).
 let latestCursor = { x: -1, y: -1 };
-
-// Gaze cross-fade bookkeeping: when the chosen gaze direction changes we fade
-// from the previous named frame to the new one over GAZE_FADE seconds.
-const gaze = { prev: GAZE_FORWARD, cur: GAZE_FORWARD, t: 1 }; // t in [0,1]; 1 == fully on `cur`
 
 // Claude Code status (section D), tracked per session (global hooks mean any
 // number of Claude Code tasks can be live at once across projects).
@@ -435,32 +407,6 @@ function tickBond(dt, now) {
   saveBondState(now);
 }
 
-// Choose the gaze frame NAME by matching the pet→cursor vector to the closest
-// named direction. Vectors are in screen coords (x right, y DOWN), so there is no
-// angle-sign ambiguity: we just pick the art frame that looks most toward the
-// cursor. Cursor on/near the pet → 'nose' (cross-eyed) / 'forward'.
-function gazeName() {
-  if (latestCursor.x < 0) return GAZE_FORWARD; // no cursor sample yet
-  const centerX = state.pos.x + WIN / 2; // pet is horizontally centered
-  const centerY = state.pos.y + PET_Y + PET / 2; // visual center of the pet
-  const vx = latestCursor.x - centerX;
-  const vy = latestCursor.y - centerY;
-  const len = Math.hypot(vx, vy);
-  if (len < GAZE_NOSE_PX) return GAZE_NOSE; // cursor right on the face → cross-eyed
-  if (len < GAZE_NEAR_PX) return GAZE_FORWARD; // cursor near → look straight at you
-  let best = GAZE_DIRS[0];
-  let bestDot = -Infinity;
-  for (const g of GAZE_DIRS) {
-    // cosine similarity between the cursor vector and this frame's direction
-    const dot = (vx * g.dx + vy * g.dy) / (len * Math.hypot(g.dx, g.dy));
-    if (dot > bestDot) {
-      bestDot = dot;
-      best = g;
-    }
-  }
-  return best.name;
-}
-
 // ---- Pixel-perfect hit test -------------------------------------------------
 
 // Map client (CSS) coords to canvas internal pixels (accounting for rect scale
@@ -515,19 +461,11 @@ function drawClipFrame() {
   ctx.restore();
 }
 
-// Draw the REST pose: the gaze-selected (direction-named) eyes frame, with a soft
-// cross-fade when the gaze direction changes, all under the breathing scale.
+// Draw the REST pose: the calm front-facing 抱臂 frame held static under a
+// gentle breathing scale (feet planted at the baseline, chest rises/falls).
 function drawRest(now) {
-  const eyes = images.eyes;
-  if (!eyes) return;
-
-  // Pick the target gaze frame (by name) and start a fade if it changed.
-  const want = gazeName();
-  if (want !== gaze.cur) {
-    gaze.prev = gaze.cur;
-    gaze.cur = want;
-    gaze.t = 0;
-  }
+  const img = images.scratch && images.scratch[0];
+  if (!img || !img.complete || img.naturalWidth === 0) return;
 
   // Breathing scale, anchored at the ground baseline (feet planted, chest rises).
   const s = 1 + BREATH_AMT * Math.sin((2 * Math.PI * now) / BREATH_PERIOD);
@@ -537,25 +475,11 @@ function drawRest(now) {
   ctx.translate(cx, BASELINE_WIN);
   ctx.scale(1, s);
   ctx.translate(-cx, -BASELINE_WIN);
-
-  // Draw the outgoing frame at full opacity first so the (identical) body stays
-  // fully opaque throughout the fade — only the incoming pupils blend on top.
-  // This also keeps the alpha hit-test correct mid-fade.
-  const prevImg = eyes[gaze.prev];
-  const curImg = eyes[gaze.cur];
-  if (gaze.t < 1 && prevImg && prevImg.complete && prevImg.naturalWidth) {
-    ctx.globalAlpha = 1;
-    ctx.drawImage(prevImg, 0, 0, SRC, SRC, PET_X, PET_Y, PET, PET);
-  }
-  if (curImg && curImg.complete && curImg.naturalWidth) {
-    ctx.globalAlpha = Math.min(gaze.t, 1);
-    ctx.drawImage(curImg, 0, 0, SRC, SRC, PET_X, PET_Y, PET, PET);
-  }
-  ctx.globalAlpha = 1;
+  ctx.drawImage(img, 0, 0, SRC, SRC, PET_X, PET_Y, PET, PET);
   ctx.restore();
 }
 
-function drawFrame(now, dt) {
+function drawFrame(now) {
   ctx.clearRect(0, 0, WIN, WIN);
 
   // Drop-hover gives a tiny scale-up cue (section E), anchored at the ground
@@ -572,8 +496,6 @@ function drawFrame(now, dt) {
   }
 
   if (isResting()) {
-    // Advance the gaze cross-fade clock (frame chosen inside drawRest).
-    gaze.t = Math.min(gaze.t + dt / GAZE_FADE, 1);
     drawRest(now);
   } else {
     drawClipFrame();
@@ -796,15 +718,15 @@ function loop(now) {
     }
   }
 
-  // 2) Advance the current clip by elapsed time vs its fps (REST is gaze-driven,
-  //    so it is skipped here and handled entirely in drawFrame/drawRest).
+  // 2) Advance the current clip by elapsed time vs its fps (REST holds a static
+  //    pose, so it is skipped here and handled entirely in drawFrame/drawRest).
   if (!isResting()) advanceAnimation(dt);
 
   // 3) Move toward the walk target if we're walking.
   if (walkTarget) stepWalk(dt);
 
   // 4) Draw, then re-test click-through against the (possibly moved) sprite.
-  drawFrame(now, dt);
+  drawFrame(now);
   updateInteractivity();
   // 5) Count active interaction toward expression unlocks.
   tickBond(dt, now);
@@ -879,12 +801,12 @@ function setClip(name, { loopTarget = 0 } = {}) {
   state._frameAcc = 0;
 }
 
-// Enter (or re-enter) the REST phase: the canonical idle. Draws the gaze-tracked
-// eyes + breathing, then schedules the next ACTIVE phase. Replaces v1's goIdle.
+// Enter (or re-enter) the REST phase: the canonical idle. Holds the static 抱臂
+// pose + breathing, then schedules the next ACTIVE phase. Replaces v1's goIdle.
 function enterRest() {
   walkTarget = null;
   returningHome = false;
-  setClip('eyes');
+  setClip(REST);
   scheduleActive();
 }
 
@@ -930,7 +852,7 @@ function onActivityDone() {
   if (claudeHolding()) {
     // A one-off (e.g. the completion yip) finished during a hold: settle back
     // into the attentive REST instead of looping the clip.
-    setClip('eyes');
+    setClip(REST);
     return;
   }
   if (returningHome) {
@@ -1065,7 +987,7 @@ async function endDrag(e) {
 
   if (state.paused) {
     // Paused: settle straight into REST, no scheduling.
-    setClip('eyes');
+    setClip(REST);
     return;
   }
 
@@ -1086,7 +1008,7 @@ async function endDrag(e) {
     // A real drag: wherever you put the pet down is its new home. Settle, then
     // resume the rest/active cycle after a short beat.
     state.home = { x: wx, y: wy };
-    setClip('eyes');
+    setClip(REST);
     state.resumeTimer = setTimeout(() => {
       enterRest();
     }, RESUME_DELAY);
@@ -1236,7 +1158,7 @@ window.pet.onMenuCommand((cmd) => {
       demoTimer = null;
       walkTarget = null;
       returningHome = false;
-      setClip('eyes');
+      setClip(REST);
     } else {
       enterRest();
     }
@@ -1315,7 +1237,7 @@ window.pet.onPowerSleep((on) => {
     walkTarget = null;
     returningHome = false;
     pendingMove = null;
-    setClip('eyes');
+    setClip(REST);
   } else if (!state.paused && !state.dragging) {
     enterRest();
   }
@@ -1328,8 +1250,8 @@ window.pet.onPowerSleep((on) => {
 // what the chip shows and whether the scheduler is held. A live drag always
 // wins, so holds never fight the user.
 
-// Enter an attentive REST hold: pause the scheduler and sit with the
-// gaze-tracked eyes. No-op visually if a drag is in progress.
+// Enter an attentive REST hold: pause the scheduler and sit in the idle
+// pose. No-op visually if a drag is in progress.
 function enterClaudeHold() {
   clearTimeout(state.phaseTimer);
   clearTimeout(state.resumeTimer);
@@ -1353,7 +1275,7 @@ function applyClaudeBody(display) {
     walkTarget = null; // 原地，不位移
     setClip('walk', { loopTarget: 3 }); // 踏步 3 轮 → onActivityDone 接回 eyes
   } else {
-    setClip('eyes');
+    setClip(REST);
   }
 }
 
