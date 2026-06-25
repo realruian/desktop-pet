@@ -6,9 +6,7 @@ const els = {
   apiKey: $('apiKey'),
   toggleKey: $('toggleKey'),
   model: $('model'),
-  modelList: $('modelList'),
-  modelHint: $('modelHint'),
-  refreshModels: $('refreshModels'),
+  modelCustom: $('modelCustom'),
   baseURL: $('baseURL'),
   presetOpenRouter: $('presetOpenRouter'),
   presetAiHubMix: $('presetAiHubMix'),
@@ -19,6 +17,9 @@ const els = {
   wakeEnabled: $('wakeEnabled'),
   wakeThreshold: $('wakeThreshold'),
   wakeLabel: $('wakeLabel'),
+  idleChatterEnabled: $('idleChatterEnabled'),
+  idleChatterMin: $('idleChatterMin'),
+  idleChatterLabel: $('idleChatterLabel'),
   openFile: $('openFile'),
   test: $('test'),
   save: $('save'),
@@ -41,19 +42,33 @@ function looksLikeRealKey(k) {
   return typeof k === 'string' && k.trim().length >= 15;
 }
 
-// innerHTML 注入 <option> 前转义，杜绝模型名里的特殊字符破坏标签。
-function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      })[c]
-  );
+// 模型取值：选「自定义」时读手动输入框，否则读下拉本身。
+function getModelValue() {
+  if (els.model.value === '__custom__') return els.modelCustom.value.trim();
+  return els.model.value;
+}
+
+// 把已保存的 model 铺回控件：命中下拉里的某项就选中它，否则落到「自定义」并填进输入框。
+function setModelValue(id) {
+  const opt = [...els.model.options].find((o) => o.value === id);
+  if (id && opt) {
+    els.model.value = id;
+    els.modelCustom.hidden = true;
+  } else if (id) {
+    els.model.value = '__custom__';
+    els.modelCustom.value = id;
+    els.modelCustom.hidden = false;
+  } else {
+    els.model.selectedIndex = 0;
+    els.modelCustom.hidden = true;
+  }
+}
+
+// 主动互动开关旁的「开启/关闭」文字。
+function updateIdleChatterLabel() {
+  els.idleChatterLabel.textContent = els.idleChatterEnabled.checked
+    ? '开启'
+    : '关闭';
 }
 
 let statusTimer = null;
@@ -72,12 +87,14 @@ function flash(msg, isError = false) {
 function currentPatch() {
   return {
     apiKey: els.apiKey.value.trim(),
-    model: els.model.value.trim(),
+    model: getModelValue(),
     baseURL: els.baseURL.value.trim(),
     persona: els.persona.value,
     vault: els.vault.value.trim(),
     wakeEnabled: els.wakeEnabled.checked,
     wakeThreshold: parseFloat(els.wakeThreshold.value) || 0.2,
+    idleChatterEnabled: els.idleChatterEnabled.checked,
+    idleChatterMin: parseInt(els.idleChatterMin.value, 10) || 25,
   };
 }
 
@@ -98,7 +115,7 @@ async function refill() {
   try {
     const cfg = await window.settings.load();
     els.apiKey.value = cfg.apiKey || '';
-    els.model.value = cfg.model || '';
+    setModelValue(cfg.model || '');
     els.baseURL.value = cfg.baseURL || '';
     els.vault.value = cfg.vault || '';
     els.persona.value = cfg.persona || '';
@@ -106,7 +123,11 @@ async function refill() {
     els.wakeEnabled.checked = !!cfg.wakeEnabled;
     els.wakeThreshold.value =
       cfg.wakeThreshold != null ? cfg.wakeThreshold : 0.2;
+    els.idleChatterEnabled.checked = cfg.idleChatterEnabled !== false;
+    els.idleChatterMin.value =
+      cfg.idleChatterMin != null ? cfg.idleChatterMin : 25;
     updateWakeLabel();
+    updateIdleChatterLabel();
     syncPresetActive();
     // 没填真 Key 就让欢迎横幅出来；填好了就藏起来不打扰
     els.welcome.hidden = looksLikeRealKey(cfg.apiKey);
@@ -129,27 +150,15 @@ els.presetAiHubMix.addEventListener('click', () => {
 });
 els.baseURL.addEventListener('input', syncPresetActive);
 
-// ---- 模型：拉取该服务商的真实可用列表，填进可搜索下拉 ----
-els.refreshModels.addEventListener('click', async () => {
-  els.refreshModels.disabled = true;
-  els.modelHint.textContent = '拉取中…';
-  try {
-    const r = await window.settings.listModels(currentPatch());
-    if (r && r.ok) {
-      els.modelList.innerHTML = r.models
-        .map((id) => `<option value="${escapeHtml(id)}"></option>`)
-        .join('');
-      els.modelHint.textContent =
-        '已拉取 ' + r.models.length + ' 个模型——点模型框搜索选择';
-    } else {
-      els.modelHint.textContent = '拉取失败：' + ((r && r.error) || '未知');
-    }
-  } catch (err) {
-    els.modelHint.textContent = '拉取失败：' + err.message;
-  } finally {
-    els.refreshModels.disabled = false;
-  }
+// ---- 模型下拉：选「自定义」时露出手动输入框 ----
+els.model.addEventListener('change', () => {
+  const custom = els.model.value === '__custom__';
+  els.modelCustom.hidden = !custom;
+  if (custom) els.modelCustom.focus();
 });
+
+// ---- 主动互动开关：联动文字 ----
+els.idleChatterEnabled.addEventListener('change', updateIdleChatterLabel);
 
 // ---- 人设「恢复默认」----
 els.resetPersona.addEventListener('click', () => {

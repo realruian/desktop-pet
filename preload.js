@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('pet', {
   getPos: () => ipcRenderer.invoke('get-pos'), // -> [x, y]
   getCursor: () => ipcRenderer.invoke('get-cursor'), // -> {x, y}
   getWorkArea: () => ipcRenderer.invoke('get-work-area'), // -> {x, y, width, height}
+  // 主动互动初始配置 -> { enabled, minMinutes }
+  getIdleChatterConfig: () => ipcRenderer.invoke('get-idle-chatter-config'),
   // Resolve the absolute filesystem path of a dropped File (Electron 32+ no
   // longer exposes File.path; webUtils does the lookup from the trusted side).
   getPathForFile: (f) => webUtils.getPathForFile(f),
@@ -40,6 +42,9 @@ contextBridge.exposeInMainWorld('pet', {
   onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
   // Wake word heard (section H): bark + perk up as acknowledgement.
   onWakeBark: (cb) => ipcRenderer.on('wake-bark', () => cb()),
+  // 主动互动配置变更（设置面板保存后即时下发）-> { enabled, minMinutes }
+  onIdleChatterConfig: (cb) =>
+    ipcRenderer.on('idle-chatter-config', (_e, c) => cb(c)),
   // Display sleep/wake reconcile: main pushes the window's true (clamped)
   // position so the renderer re-homes there, fixing post-unlock drift.
   onResyncPos: (cb) => ipcRenderer.on('resync-pos', (_e, p) => cb(p)),

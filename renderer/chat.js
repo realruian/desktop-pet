@@ -377,4 +377,8 @@ inputEl.addEventListener('keydown', (e) => {
 
 closeEl.addEventListener('click', () => window.chat.hide());
 
+// 聊天窗是「创建一次、反复隐藏/显示」，每次 openChat 主进程都会 chatWin.focus()，
+// 触发这里的 window focus 事件 → 把焦点落到输入框，双击打开即可直接打字，无需再点一下。
+window.addEventListener('focus', () => inputEl.focus());
+
 inputEl.focus();

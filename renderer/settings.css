@@ -144,6 +144,35 @@ body {
   user-select: text;
 }
 
+/* 模型下拉：沿用输入框调性，右侧画一个自定义箭头 */
+.field select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.94);
+  padding: 7px 28px 7px 9px;
+  font: inherit;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 48 48' fill='none'><path d='M12 18L24 30L36 18' stroke='rgba(255,255,255,0.5)' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
+.field select:focus {
+  border-color: rgba(122, 162, 255, 0.6);
+  background-color: rgba(255, 255, 255, 0.09);
+}
+
+.field select optgroup,
+.field select option {
+  background: #1c1d26;
+  color: rgba(255, 255, 255, 0.94);
+}
+
 .field input:focus {
   border-color: rgba(122, 162, 255, 0.6);
   background: rgba(255, 255, 255, 0.09);
@@ -379,7 +408,8 @@ body {
   margin-right: 6px;
 }
 
-#wakeThreshold {
+#wakeThreshold,
+#idleChatterMin {
   width: 64px;
   flex: none;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -392,7 +422,8 @@ body {
   text-align: center;
 }
 
-#wakeThreshold:focus {
+#wakeThreshold:focus,
+#idleChatterMin:focus {
   border-color: rgba(122, 162, 255, 0.6);
 }
 

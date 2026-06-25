@@ -226,6 +226,12 @@ ipcMain.handle('get-work-area', () =>
   screen.getDisplayMatching(win.getBounds()).workArea
 );
 
+// 主动互动初始配置（桌宠启动时拉一次）→ { enabled, minMinutes }
+ipcMain.handle('get-idle-chatter-config', () => {
+  const c = loadKimiConfig();
+  return { enabled: c.idleChatterEnabled, minMinutes: c.idleChatterMin };
+});
+
 // Right-click context menu, built and popped up by the main process.
 ipcMain.on('show-menu', () => {
   if (!win) return;
@@ -371,6 +377,7 @@ function loadKimiConfig() {
   let stt = {};
   let hotkey = {};
   let wake = {};
+  let idle = {};
   for (const p of CONFIG_PATHS) {
     try {
       const raw = fs.readFileSync(p, 'utf8');
@@ -380,6 +387,7 @@ function loadKimiConfig() {
       stt = parsed.stt || {};
       hotkey = parsed.hotkey || {};
       wake = parsed.wake || {};
+      idle = parsed.idle || {};
       break; // first existing config wins (userData, then repo checkout)
     } catch (_) {
       /* try the next location; none → env/defaults */
@@ -407,6 +415,9 @@ function loadKimiConfig() {
     wakeThreshold:
       Number(process.env.PET_WAKE_THRESHOLD) || wake.threshold || 0.2,
     wakeScore: Number(process.env.PET_WAKE_SCORE) || wake.score || 2.0,
+    // 主动互动：默认开，下限默认 25 分钟（实际触发在 [min, min+20] 随机）
+    idleChatterEnabled: idle.enabled !== false,
+    idleChatterMin: Number(idle.minMinutes) || 25,
   };
 }
 
@@ -550,6 +561,8 @@ ipcMain.handle('settings:load', () => {
     defaultPersona: PERSONA,
     wakeEnabled: c.wakeEnabled,
     wakeThreshold: c.wakeThreshold,
+    idleChatterEnabled: c.idleChatterEnabled,
+    idleChatterMin: c.idleChatterMin,
   };
 });
 
@@ -586,12 +599,27 @@ ipcMain.handle('settings:save', (_e, patch) => {
       threshold: Number(patch.wakeThreshold) || parsed.wake?.threshold || 0.2,
     });
   }
+  // 主动互动：开关 + 频率下限
+  if (typeof patch.idleChatterEnabled === 'boolean') {
+    parsed.idle = Object.assign({}, parsed.idle, {
+      enabled: patch.idleChatterEnabled,
+      minMinutes:
+        Number(patch.idleChatterMin) || parsed.idle?.minMinutes || 25,
+    });
+  }
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
     // 唤醒开关即时生效（重启 KWS 引擎）；config 已在上面写过，不再重复持久化
     if (typeof patch.wakeEnabled === 'boolean') {
       setWakeEnabled(patch.wakeEnabled, false);
+    }
+    // 主动互动配置即时推给桌宠（重排定时器）
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('idle-chatter-config', {
+        enabled: patch.idleChatterEnabled !== false,
+        minMinutes: Number(patch.idleChatterMin) || 25,
+      });
     }
     return { ok: true, path: target };
   } catch (err) {
@@ -845,8 +873,9 @@ function createChatWindow() {
     height: CHAT_H,
     transparent: true,
     frame: false,
+    roundedCorners: false, // 关掉 macOS 原生圆角，避免与 CSS border-radius 叠出两层
     resizable: false,
-    hasShadow: true,
+    hasShadow: false, // 原生阴影按方形窗框绘制，会在 CSS 圆角外露出半透明直角——交给 CSS
     skipTaskbar: true,
     fullscreenable: false,
     useContentSize: true,
@@ -868,6 +897,10 @@ function createChatWindow() {
       e.preventDefault();
       chatWin.hide();
     }
+  });
+  // 点击聊天窗以外的任何地方 → 失焦 → 自动关闭
+  chatWin.on('blur', () => {
+    chatWin.hide();
   });
   chatWin.on('closed', () => {
     chatWin = null;

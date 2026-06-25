@@ -99,11 +99,11 @@ const EYES_FRAMES = [
 // any session waiting beats working; multiple running shows a ＋N suffix;
 // each completion flashes done with that task's label (and a wave), then the
 // chip returns to the remaining tasks or fades away.
-const CHIP_W = 92; // chip width (WIN-space px), centered above the head
-const CHIP_H = 16; // chip height (single row); the pet's crown is at y≈21
-const CHIP_Y = 0; // chip top
-const CHIP_PAD = 7; // left/right inner padding
-const CHIP_LABEL_FONT = '9px -apple-system, "PingFang SC", system-ui, sans-serif';
+const CHIP_H = 22;  // 气泡主体高度；河马头顶约在 y≈21
+const CHIP_TAIL = 6;// 气泡尾巴高度，尖端指向河马头
+const CHIP_Y = 0;   // 气泡顶部
+const CHIP_PAD = 8; // 左右内边距
+const CHIP_LABEL_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif';
 const CHIP_FADE_MS = 450; // chip fade-out once everything is done
 const DONE_FLASH_MS = 2200; // how long each task's done flash holds
 const SESSION_STALE_MS = 15 * 60 * 1000; // forget sessions silent this long
@@ -284,6 +284,13 @@ const unlockNotice = {
   until: 0,
   label: '',
 };
+
+// 主动互动（idle chatter）：河马时不时冒个 speech 气泡关心你。drawOverlay 里
+// 以最低优先级显示，被任何 Claude / 解锁通知盖过。配置来自 config.json（idle 段）。
+const speechBubble = { text: '', until: 0 };
+const idleChatter = { enabled: true, minMinutes: 25, timer: null };
+const SPEECH_HOLD_MS = 6000; // 气泡停留约 6 秒
+const SPEECH_FADE_MS = 600; // 之后淡出
 
 // True while a file/folder is being dragged over the pet (section E): show a
 // folder glyph and a tiny scale-up cue inviting the drop.
@@ -582,78 +589,115 @@ function ellipsize(text, maxW) {
   return text + '…';
 }
 
-// The status chip: one compact row above the pet's head — a small DRAWN
-// indicator (spinner / pulsing dot / check, crisp at a few px, no emoji)
-// followed by the task label and an optional ＋N more-tasks suffix.
+// 小爱心（speech 模式的指示器）：粉色实心，画在气泡左侧代替转圈/对勾。
+function drawHeart(cx, cy, s, color) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.85);
+  ctx.bezierCurveTo(cx + s * 1.1, cy + s * 0.1, cx + s * 0.6, cy - s * 0.95, cx, cy - s * 0.3);
+  ctx.bezierCurveTo(cx - s * 0.6, cy - s * 0.95, cx - s * 1.1, cy + s * 0.1, cx, cy + s * 0.85);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+// 河马头顶的对话气泡——白色圆角矩形 + 向下的小三角尾巴，比黑色胶囊更契合宠物气质。
+// 白底深字在任何壁纸上都清晰；尾巴尖端落在河马额头处，视觉上像「河马在说话」。
+// 宽度随文案自适应（指示器 + 文字 + 可选 ＋N），整体居中于河马头顶。
 function drawStatusChip(now, alpha, mode, label, suffix) {
-  const x = (WIN - CHIP_W) / 2;
-  const y = CHIP_Y;
   const color = CHIP_COLOR[mode] || CHIP_COLOR.working;
+  const by = CHIP_Y + 1;
+  const r  = CHIP_H / 2;          // 全圆角胶囊
+  const cx = WIN / 2;             // 水平中心（尾巴对准河马头）
 
   ctx.save();
-  ctx.globalAlpha = alpha;
 
-  // Panel: dark translucent + hairline border, readable over any wallpaper.
-  ctx.beginPath();
-  ctx.roundRect(x + 0.5, y + 0.5, CHIP_W - 1, CHIP_H - 1, 6);
-  ctx.fillStyle = 'rgba(17,18,26,0.78)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // Status indicator.
-  const ix = x + CHIP_PAD + 3.5; // indicator center
-  const iy = y + CHIP_H / 2;
-  if (mode === 'working') {
-    // Tiny spinner: a 270° arc revolving ~0.8 rev/s — "still running".
-    const a0 = (now / 1250) * 2 * Math.PI;
-    ctx.beginPath();
-    ctx.arc(ix, iy, 3, a0, a0 + Math.PI * 1.5);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.4;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-  } else if (mode === 'waiting') {
-    // Amber dot, gently pulsing — needs your attention.
-    const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(now / 280));
-    ctx.beginPath();
-    ctx.arc(ix, iy, 3, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.globalAlpha = alpha * pulse;
-    ctx.fill();
-    ctx.globalAlpha = alpha;
-  } else {
-    // Done: green disc with a crisp white check.
-    ctx.beginPath();
-    ctx.arc(ix, iy, 3.6, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(ix - 1.7, iy + 0.1);
-    ctx.lineTo(ix - 0.4, iy + 1.5);
-    ctx.lineTo(ix + 1.9, iy - 1.4);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  }
-
-  // Task label: WHICH task this status belongs to. The ＋N "more tasks" suffix
-  // is drawn separately AFTER ellipsizing, so a long label can never swallow it.
+  // 先量文字以决定气泡宽度
   ctx.font = CHIP_LABEL_FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  const tx = ix + 7;
-  const maxW = x + CHIP_W - CHIP_PAD - tx;
-  const sufW = suffix ? ctx.measureText(suffix).width + 2 : 0;
-  const text = ellipsize(label || 'Claude 任务', maxW - sufW);
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  const IND_W = 8;                // 指示器视觉直径
+  const GAP   = 6;                // 指示器与文字间距
+  const MAX_W = WIN - 12;         // 气泡最大宽（窗口宽留两侧外边距）
+  const sufW  = suffix ? ctx.measureText(suffix).width + 3 : 0;
+  const innerMax = MAX_W - CHIP_PAD * 2 - IND_W - GAP - sufW;
+  const text  = ellipsize(label || 'Claude', innerMax);
+  const textW = ctx.measureText(text).width;
+  const chipW = Math.min(MAX_W, CHIP_PAD * 2 + IND_W + GAP + textW + sufW);
+  const bx = (WIN - chipW) / 2;
+
+  ctx.globalAlpha = alpha;
+
+  // 气泡主体（白色圆角矩形）—— 不加 canvas 阴影：blur 在透明窗上会发灰发脏
+  ctx.beginPath();
+  ctx.roundRect(bx, by, chipW, CHIP_H, r);
+  ctx.fillStyle = 'rgba(255,255,255,0.98)';
+  ctx.fill();
+
+  // 尾巴三角，与主体底部无缝衔接
+  ctx.beginPath();
+  ctx.moveTo(cx - 5, by + CHIP_H - 1);
+  ctx.lineTo(cx + 5, by + CHIP_H - 1);
+  ctx.lineTo(cx,     by + CHIP_H + CHIP_TAIL);
+  ctx.closePath();
+  ctx.fill();
+
+  // 极淡边框勾轮廓（替代阴影做层次）
+  ctx.beginPath();
+  ctx.roundRect(bx + 0.5, by + 0.5, chipW - 1, CHIP_H - 1, r);
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth   = 1;
+  ctx.stroke();
+
+  // 状态指示器（彩色，在气泡左侧）
+  const ix = bx + CHIP_PAD + IND_W / 2;
+  const iy = by + CHIP_H / 2;
+
+  if (mode === 'working') {
+    // 蓝色转圈：约 0.8 圈/秒
+    const a0 = (now / 1250) * 2 * Math.PI;
+    ctx.beginPath();
+    ctx.arc(ix, iy, 3.5, a0, a0 + Math.PI * 1.5);
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1.6;
+    ctx.lineCap     = 'round';
+    ctx.stroke();
+  } else if (mode === 'waiting') {
+    // 琥珀色脉冲点：需要你来确认
+    const pulse = 0.6 + 0.4 * Math.sin(now / 280);
+    ctx.beginPath();
+    ctx.arc(ix, iy, 3.5, 0, 2 * Math.PI);
+    ctx.fillStyle   = color;
+    ctx.globalAlpha = alpha * pulse;
+    ctx.fill();
+    ctx.globalAlpha = alpha;
+  } else if (mode === 'speech') {
+    // 主动互动：粉色小爱心，随呼吸轻微缩放
+    const beat = 1 + 0.12 * Math.sin(now / 320);
+    drawHeart(ix, iy, 3.6 * beat, '#ff6b9d');
+  } else {
+    // 完成：绿色圆 + 白色对勾
+    ctx.beginPath();
+    ctx.arc(ix, iy, 3.8, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(ix - 1.8, iy + 0.2);
+    ctx.lineTo(ix - 0.4, iy + 1.6);
+    ctx.lineTo(ix + 2.0, iy - 1.5);
+    ctx.strokeStyle  = '#fff';
+    ctx.lineWidth    = 1.3;
+    ctx.lineCap      = 'round';
+    ctx.lineJoin     = 'round';
+    ctx.stroke();
+  }
+
+  // 文字（深色，白底可读）
+  const tx = bx + CHIP_PAD + IND_W + GAP;
+  ctx.fillStyle = 'rgba(20,20,30,0.85)';
   ctx.fillText(text, tx, iy);
   if (suffix) {
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(suffix, tx + ctx.measureText(text).width + 2, iy);
+    ctx.fillStyle = 'rgba(20,20,30,0.42)';
+    ctx.fillText(suffix, tx + textW + 3, iy);
   }
 
   ctx.restore();
@@ -680,17 +724,27 @@ function drawOverlay(now) {
     chipAlpha = 1 - (now - unlockNotice.until) / CHIP_FADE_MS;
   } else if (now < claude.doneUntil) {
     mode = 'done';
-    label = claude.doneLabel;
+    label = '完成啦～';   // 庆祝文案，比项目名更有温度
     chipAlpha = 1;
   } else if (claude.display === 'working' || claude.display === 'waiting') {
     mode = claude.display;
-    label = claude.taskLabel;
+    label = mode === 'waiting' ? '等你确认！' : (claude.taskLabel || 'Claude');
     if (claude.taskExtra > 0) suffix = '＋' + claude.taskExtra;
     chipAlpha = 1;
   } else if (now < claude.doneUntil + CHIP_FADE_MS) {
     mode = 'done';
-    label = claude.doneLabel;
+    label = '完成啦～';
     chipAlpha = 1 - (now - claude.doneUntil) / CHIP_FADE_MS;
+  }
+  // 主动互动气泡：最低优先级——只有在没有任何 Claude/解锁状态时才冒出来。
+  if (!mode && now < speechBubble.until) {
+    mode = 'speech';
+    label = speechBubble.text;
+    chipAlpha = 1;
+  } else if (!mode && now < speechBubble.until + SPEECH_FADE_MS) {
+    mode = 'speech';
+    label = speechBubble.text;
+    chipAlpha = 1 - (now - speechBubble.until) / SPEECH_FADE_MS;
   }
   if (chipAlpha > 0.01 && mode)
     drawStatusChip(now, chipAlpha, mode, label, suffix);
@@ -1332,10 +1386,9 @@ setInterval(refreshClaude, 60 * 1000);
 // when that's unavailable (pet launched mid-task / Notification-only), the
 // project folder's name from cwd.
 function taskLabelFrom(prompt, cwd) {
-  const p = (prompt || '').replace(/\s+/g, ' ').trim();
-  if (p) return p.slice(0, 60); // ellipsized to chip width at draw time
+  // 只显示项目目录名——prompt 前几字没有意义，指示器图标已说明状态
   const parts = (cwd || '').split('/').filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : '';
+  return parts.length ? parts[parts.length - 1] : 'Claude';
 }
 
 window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
@@ -1396,6 +1449,94 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
   refreshClaude();
 });
 
+// ---- 主动互动（idle chatter）------------------------------------------------
+//
+// 每隔 [min, min+20] 分钟随机冒一个 speech 气泡，配一声很轻的「叮」。文案分四类：
+// 久坐提醒 / 关心陪伴 / 卖萌唠嗑 / 按时段问候。屏幕休眠、拖拽、Claude 任务占用
+// 气泡时本轮跳过（直接重排），不打断正在进行的事。
+
+// 文案保持短（气泡单行，最宽约 10 个汉字）。
+const CHATTER = {
+  sit: ['坐久啦，起来动动～', '记得喝口水哦', '伸个懒腰吧！', '抬头远眺一下眼睛'],
+  care: ['今天也辛苦啦', '别太累，我陪着你', '深呼吸，放松一下～', '你已经很棒啦'],
+  cute: ['河马在偷看你～', '摸摸我嘛', '嘿，被我发现摸鱼', '哼哧哼哧…'],
+};
+
+// 按时段问候：触发时按当前小时挑一池。
+function timeGreeting() {
+  const h = new Date().getHours();
+  if (h < 5) return ['夜深了，早点睡呀', '别熬太晚哦'];
+  if (h < 11) return ['早上好呀！', '新的一天，加油！'];
+  if (h < 14) return ['中午啦，吃饭了吗', '午休一下吧～'];
+  if (h < 18) return ['下午好～', '喝杯茶提提神？'];
+  if (h < 23) return ['晚上好呀', '忙完了吗？歇会儿'];
+  return ['夜深了，早点睡呀', '别熬太晚哦'];
+}
+
+function pickChatter() {
+  const pools = [CHATTER.sit, CHATTER.care, CHATTER.cute, timeGreeting()];
+  const pool = pools[Math.floor(Math.random() * pools.length)];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// 很轻的柔和「叮」：Web Audio 合成一个正弦音 + 快速衰减，避免突兀。首个用户手势
+// 之前 AudioContext 可能被挂起，能 resume 就 resume，不行就静默。
+let audioCtx = null;
+function playDing() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.exponentialRampToValueAtTime(1320, t + 0.1);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.05, t + 0.02); // 很轻
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.55);
+  } catch (_) {
+    /* 没声音也不影响 */
+  }
+}
+
+function scheduleChatter() {
+  clearTimeout(idleChatter.timer);
+  if (!idleChatter.enabled) return;
+  const min = Math.max(1, idleChatter.minMinutes);
+  // 实际触发落在 [min, min+20] 分钟随机，保留「不定时」的惊喜感。
+  const ms = (min + Math.random() * 20) * 60 * 1000;
+  idleChatter.timer = setTimeout(fireChatter, ms);
+}
+
+function fireChatter() {
+  // 占用中（休眠 / 拖拽 / Claude 气泡）本轮跳过，避免抢气泡或在锁屏时出声。
+  const busy =
+    powerSleep ||
+    state.dragging ||
+    claudeHolding() ||
+    performance.now() < claude.doneUntil;
+  if (idleChatter.enabled && !busy) {
+    speechBubble.text = pickChatter();
+    speechBubble.until = performance.now() + SPEECH_HOLD_MS;
+    playDing();
+  }
+  scheduleChatter();
+}
+
+// 设置面板保存后即时下发：更新开关/频率并重排定时器。
+window.pet.onIdleChatterConfig((c) => {
+  if (!c) return;
+  idleChatter.enabled = c.enabled !== false;
+  idleChatter.minMinutes = Number(c.minMinutes) || 25;
+  scheduleChatter();
+});
+
 // ---- Boot -------------------------------------------------------------------
 
 async function start() {
@@ -1415,6 +1556,18 @@ async function start() {
   } catch (_) {
     /* fall back to the -1 sentinel; pointermove / onCursor will populate it */
   }
+
+  // 拉一次主动互动配置并起定时器（设置面板改动后会再下发覆盖）。
+  try {
+    const ic = await window.pet.getIdleChatterConfig();
+    if (ic) {
+      idleChatter.enabled = ic.enabled !== false;
+      idleChatter.minMinutes = Number(ic.minMinutes) || 25;
+    }
+  } catch (_) {
+    /* 拿不到就用默认（开，25 分钟） */
+  }
+  scheduleChatter();
 
   // Begin in REST and start the render loop.
   enterRest();

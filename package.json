@@ -4,7 +4,7 @@
   "description": "A cute pixel Hema (hippo) desktop pet for macOS (Electron): draggable, wanders randomly, transparent click-through window.",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
     "pack": "node build/pack.js"
   },
   "license": "MIT",
