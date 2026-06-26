@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('pet', {
   openInClaude: (p) => ipcRenderer.send('open-in-claude', p),
   // Open the chat panel (section F) — double-click on the body / context menu.
   openChat: () => ipcRenderer.send('open-chat'),
+  // 上报亲密度摘要，供主进程右键菜单「亲密度」子菜单展示。
+  reportBond: (s) => ipcRenderer.send('report-bond', s),
 
   // Request/response queries -------------------------------------------------
   getPos: () => ipcRenderer.invoke('get-pos'), // -> [x, y]

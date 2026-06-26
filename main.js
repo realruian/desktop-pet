@@ -318,6 +318,43 @@ function setCharacter(id) {
   }
 }
 
+// 亲密度摘要：渲染层（pet.js）上报，右键菜单据此展示「亲密度」子菜单。
+let bondSummary = null;
+ipcMain.on('report-bond', (_e, s) => {
+  bondSummary = s;
+});
+
+// 专注模式（番茄钟）：计时真相在主进程，菜单据此显示剩余/退出；到点驱动渲染层
+// 庆祝。focusEndAt 为 0 表示未在专注。拖动 / Claude 不影响这里的计时。
+let focusEndAt = 0;
+let focusTimer = null;
+// durationMs：专注时长毫秒；label：气泡显示文案（如「10 秒」「25 分钟」）。
+function startFocus(durationMs, label) {
+  focusEndAt = Date.now() + durationMs;
+  clearTimeout(focusTimer);
+  focusTimer = setTimeout(() => {
+    focusEndAt = 0;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('menu-command', 'focus-done');
+    }
+  }, durationMs);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('menu-command', 'focus-start-label:' + label);
+  }
+}
+function stopFocus() {
+  clearTimeout(focusTimer);
+  focusEndAt = 0;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('menu-command', 'focus-stop');
+  }
+}
+// 把毫秒余量格式化成人类可读字符串（秒级或分钟级）。
+function fmtRemainMs(ms) {
+  if (ms < 60000) return Math.max(1, Math.ceil(ms / 1000)) + ' 秒';
+  return Math.ceil(ms / 60000) + ' 分钟';
+}
+
 // Right-click context menu, built and popped up by the main process.
 ipcMain.on('show-menu', () => {
   if (!win) return;
@@ -338,6 +375,23 @@ ipcMain.on('show-menu', () => {
       label: '演示动作',
       click: () => win && win.webContents.send('menu-command', 'demo'),
     },
+    // 专注模式：未在专注时显示时长选项；专注中显示剩余时间 + 退出选项。
+    focusEndAt > 0
+      ? {
+          label: `专注中（剩余 ${fmtRemainMs(focusEndAt - Date.now())}）`,
+          submenu: [
+            { label: '退出专注', click: () => stopFocus() },
+          ],
+        }
+      : {
+          label: '开始专注',
+          submenu: [
+            { label: '10 秒（演示）', click: () => startFocus(10 * 1000, '10 秒') },
+            { label: '25 分钟', click: () => startFocus(25 * 60 * 1000, '25 分钟') },
+            { label: '45 分钟', click: () => startFocus(45 * 60 * 1000, '45 分钟') },
+            { label: '60 分钟', click: () => startFocus(60 * 60 * 1000, '60 分钟') },
+          ],
+        },
     {
       label: '切换角色',
       submenu: loadCharacters().map((c) => ({
