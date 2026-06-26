@@ -44,8 +44,7 @@ function addTyping() {
 // 欢迎气泡 + 输入框文案都随当前角色名变化。petName 由 getCharacter() 填真名，
 // '桌宠' 只是 IPC 返回前的首帧兜底。初始欢迎气泡在文件末尾的启动块里发出。
 let petName = '桌宠';
-const greetingText = () =>
-  `我是${petName}，打字或者按下面的话筒跟我说话都行～`;
+const greetingText = () => `我是${petName}，跟我说点什么吧～`;
 
 // 清空对话：清掉历史和气泡，重新放一句欢迎，回到刚开聊的状态。
 // 不弹确认——会话内是临时聊天、关掉聊天窗也不持久化，不是高风险操作。
@@ -57,16 +56,12 @@ function clearConversation() {
 }
 clearEl.addEventListener('click', clearConversation);
 
-// Send a message. With no argument it sends the input box's content; voice
-// input calls it with the transcript directly.
-async function sendMessage(textOverride) {
-  const fromBox = textOverride === undefined;
-  const text = (fromBox ? inputEl.value : textOverride).trim();
+// 发送一条消息：从输入框读取并发出。
+async function sendMessage() {
+  const text = inputEl.value.trim();
   if (!text || sending) return;
-  if (fromBox) {
-    inputEl.value = '';
-    autosize();
-  }
+  inputEl.value = '';
+  autosize();
 
   addBubble('user', text);
   history.push({ role: 'user', content: text });
@@ -148,8 +143,7 @@ function applyPetName() {
   const t = document.getElementById('title');
   if (t) t.textContent = `和${petName}聊天`;
   document.title = `${petName}聊天`;
-  // 只在空闲时刷新占位（录音中保留「…在听」提示）。
-  if (!pttActive && !rec) inputEl.placeholder = placeholderIdle();
+  inputEl.placeholder = placeholderIdle();
 }
 
 // 对话还空着（只有欢迎气泡、没真实问答）时，把欢迎气泡也换成当前角色名。

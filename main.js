@@ -1,7 +1,8 @@
-// main.js — Electron main process for the Hema Desktop Pet.
-// Owns the transparent, frameless, always-on-top, click-through window and
-// brokers all privileged operations (window move/position, cursor, work area,
-// context menu) to the sandboxed renderer over IPC.
+// main.js — Electron 桌宠的主进程（多角色 / 可换皮）。
+// 负责那个透明、无边框、永远置顶、像素级点击穿透的窗口，
+// 并把所有需要特权的操作（窗口位置、光标、工作区、右键菜单、
+// 角色切换、Claude hook 监听、聊天、设置等）经 IPC 提供给沙箱
+// 渲染层。默认角色是河马（hema），更多角色见 assets/characters/。
 
 const {
   app,
@@ -21,8 +22,8 @@ const fs = require('fs');
 const http = require('http');
 const { execFile, execFileSync, spawn } = require('child_process');
 
-// Only one 河马 at a time: a second launch (double-clicking the .app while
-// it's already running, say) just exits, after nudging the first instance.
+// 全局只能有一只桌宠：第二次启动（比如双击已经开着的 .app）会戳一下
+// 第一个实例后直接退出，避免出现两只重叠的桌宠。
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
@@ -156,12 +157,13 @@ let isPaused = false;
 /** @type {import('http').Server|null} */
 let claudeServer = null;
 
-// Cursor polling: feed the renderer the global cursor position so the resting
-// pet's eyes can track it. setInterval id (cleared on window close).
+// 光标轮询：主进程定时把全局光标位置推给渲染层，驱动像素级点击穿透
+// hit-test（桌宠会走动/呼吸，鼠标不动时也需要持续重判 hover）。
+// setInterval id（窗口关闭时清掉）。
 let cursorTimer = null;
-// Last position we pushed; skip identical sends to keep IPC quiet.
+// 上一次推送的坐标；没变就跳过，省点 IPC。
 let lastSentCursor = { x: null, y: null };
-const CURSOR_POLL_MS = 33; // ~30 Hz, matches the eyes' per-frame recompute
+const CURSOR_POLL_MS = 33; // ~30 Hz，跟渲染层的每帧 hit-test 同步
 
 function createWindow() {
   win = new BrowserWindow({
@@ -228,8 +230,8 @@ function createWindow() {
 // Snap the window back onto a visible display and resync the renderer's idea of
 // where it is. macOS routinely repositions a 'screen-saver'-level window across
 // a display sleep/wake or layout change (lock → unlock is the classic trigger);
-// the renderer's state.pos/home would then be stale, scrambling gaze,
-// click-through and the wander origin. We clamp the window fully inside the
+// the renderer's state.pos/home would then be stale, scrambling
+// click-through hit-test and the wander origin. We clamp the window fully inside the
 // nearest display's work area, re-assert the always-on-top level (it can drop
 // on wake), and push the corrected position so the renderer re-homes there.
 function reconcileWindow() {
@@ -714,7 +716,7 @@ ipcMain.handle('settings:load', () => {
   };
 });
 
-// 写回配置：合并而非覆盖，保留 stt/hotkey 等其它字段不动。
+// 写回配置：合并而非覆盖，保留未涉及的字段不动。
 ipcMain.handle('settings:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') {
     return { ok: false, error: '空表单' };

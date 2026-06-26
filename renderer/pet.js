@@ -1,4 +1,5 @@
-// pet.js — animation engine + behavior state machine for the hema.
+// pet.js — 桌宠的动画引擎 + 行为状态机（多角色通用：当前角色由
+// config.character.id 决定，素材取自 assets/characters/<id>/）。
 //
 // Responsibilities:
 //   1. Preload all sprite frames, then drive a requestAnimationFrame render loop.
@@ -7,9 +8,9 @@
 //   3. Pixel-perfect click-through: toggle window mouse-ignore based on whether
 //      the cursor is over an opaque body pixel.
 //   4. Manual 1:1 dragging via Pointer Events (main process moves the window).
-//   5. A phase-based behavior state machine: the pet RESTs ~half the time (eyes
-//      tracking the cursor + subtle breathing), punctuated by short bursts of
-//      activity (walk / scratch / wave / roll).
+//   5. A phase-based behavior state machine: the pet RESTs ~half the time
+//      (subtle breathing), punctuated by short bursts of activity
+//      (walk / scratch / wave / roll).
 
 'use strict';
 
@@ -67,8 +68,8 @@ const BASELINE = 388; // ground line in 420px source space (shared by all clips)
 const REST = 'rest';
 
 // Claude Code status layer (section D). While any session is live the
-// autonomous scheduler is paused and the pet holds an attentive REST (eyes
-// still track the cursor), with a small status chip floating above its head.
+// autonomous scheduler is paused and the pet holds an attentive REST,
+// with a small status chip floating above its head.
 //
 // Status chip: one compact row above the pet's head — [tiny DRAWN indicator]
 // [task label]. NO progress bar: Claude Code exposes no real percentage, so
@@ -271,13 +272,13 @@ let returningHome = false;
 let powerSleep = false;
 
 // Latest global cursor position in SCREEN points, fed by pet.onCursor (~30 Hz)
-// and refreshed inline by pointermove (which carries screen coords too). Drives
-// BOTH the resting gaze and the click-through hit-test — the hit-test derives
-// client coords by subtracting the window position rather than relying on
-// mousemove events, because macOS stops delivering mousemove during a system
-// drag session while the main process's cursor poll keeps flowing. That is what
-// lets a dragged file un-ignore the window and land on the pet (section E).
-// -1 means "no sample yet" → look straight ahead (East).
+// and refreshed inline by pointermove (which carries screen coords too).
+// Drives the click-through hit-test — it derives client coords by subtracting
+// the window position rather than relying on mousemove events, because macOS
+// stops delivering mousemove during a system drag session while the main
+// process's cursor poll keeps flowing. That is what lets a dragged file
+// un-ignore the window and land on the pet (section E).
+// -1 means "no sample yet" → treat as "not over the pet".
 let latestCursor = { x: -1, y: -1 };
 
 // Claude Code status (section D), tracked per session (global hooks mean any
@@ -1291,8 +1292,8 @@ window.pet.onMenuCommand((cmd) => {
   }
 });
 
-// Global cursor feed (screen points) → aim the resting gaze AND re-test
-// click-through right away (the pet may move/breathe under a still cursor).
+// Global cursor feed (screen points) → re-test click-through right away
+// (the pet may move/breathe under a still cursor, so we re-judge every tick).
 window.pet.onCursor((p) => {
   latestCursor = { x: p.x, y: p.y };
   updateInteractivity();
@@ -1325,7 +1326,7 @@ window.pet.onDropPath((p) => {
 
 // Display sleep/wake reconcile (fixes the post-unlock position scramble): main
 // pushes the window's true, on-screen-clamped position; adopt it as the new
-// home and settle there so gaze, click-through and wandering all re-anchor.
+// home and settle there so click-through and wandering all re-anchor.
 window.pet.onResyncPos((p) => {
   if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
   walkTarget = null;
@@ -1673,8 +1674,8 @@ async function start() {
   state.pos = { x: wx, y: wy };
   state.home = { x: wx, y: wy };
 
-  // Seed the cursor sample (screen points) so the first hover test and gaze
-  // have data before the poll's first tick.
+  // Seed the cursor sample (screen points) so the first hover hit-test
+  // has data before the poll's first tick.
   try {
     const c = await window.pet.getCursor();
     latestCursor = { x: c.x, y: c.y };

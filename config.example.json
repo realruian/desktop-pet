@@ -10,13 +10,9 @@
     "vault": "/Users/你的用户名/path/to/你的Obsidian库",
     "_说明": "填了这个，桌宠聊天时会自动检索库里的笔记作为参考来回答；留空或删掉则不启用"
   },
-  "stt": {
-    "model": "google/gemini-2.5-flash",
-    "_说明": "语音转文字用的模型（需支持音频输入、走同一个 API Key）；按麦克风按钮说话时使用"
-  },
   "hotkey": {
-    "ptt": "Alt+Space",
-    "_说明": "全局长按说话快捷键（Electron accelerator 格式，Alt 即 Mac 的 Option）；按住说话、松手自动转写发送。和别的应用冲突就换一个，如 Alt+D；改完重启桌宠生效"
+    "chat": "alt",
+    "_说明": "呼出聊天面板的双击修饰键：'alt'＝双击 Option（默认）/ 'meta'＝双击 Command / 'none'＝禁用；也能在设置面板里改。首次需要在 系统设置 → 隐私与安全性 → 辅助功能 给桌宠授权"
   },
   "character": {
     "id": "hema",

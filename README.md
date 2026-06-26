@@ -1,10 +1,12 @@
 <div align="center">
 
-# 🦛 河马 Hema
+# 🐾 桌宠 Desktop Pet
 
-**一只住在 Mac 桌面上的像素河马 —— 既是陪伴你的桌宠，也是盯着 Claude Code 跑活的状态面板。**
+**一只住在 Mac 桌面上的像素桌宠 —— 既是陪伴你的小动物，也是盯着 Claude Code 跑活的状态面板。**
 
 它安静呼吸、四处溜达又自己走回原位，可随手拖动；接入 Claude Code 后头顶会实时显示任务状态，把文件夹拖给它就一键在终端开工，双击还能和它聊天。
+
+内置 8 个角色（河马 / 皮卡丘 / 沙奈朵 / 骑拉帝纳 / 高达 / 小鸡毛 / 路飞 / 索隆），右键随时切换。
 
 </div>
 
@@ -20,6 +22,11 @@
 
 ## 特性
 
+**多角色**
+- 内置 8 个角色：河马、皮卡丘、沙奈朵、骑拉帝纳、高达、小鸡毛、路飞、索隆
+- 右键 → **切换角色**，即时换皮、动作/表情/亲密度系统全部通用
+- 想加角色：往 `assets/characters/<id>/` 丢一套帧（walk / scratch / wave / cheer / roll / expressions）+ `meta.json` 即可被自动识别
+
 **桌面陪伴**
 - 大部分时间安静待机，带轻微呼吸起伏与偶尔眨眼
 - 休息一阵后做个小动作或在「家」附近横向溜达，走完总会自己走回原位
@@ -33,7 +40,7 @@
 - 监听本机**所有项目**的会话，多任务并行时显示最新任务 + `＋N`
 
 **聊天 & 联网搜索**
-- 双击河马身体、或在任意应用里**双击 Option 键**（可改为双击 Command，或禁用）弹出浅色聊天卡片
+- 双击桌宠身体、或在任意应用里**双击 Option 键**（可改为双击 Command，或禁用）弹出浅色聊天卡片
 - 打开即可直接打字（任意 OpenAI 兼容模型驱动）
 - 自动接入 OpenRouter 联网搜索插件，问实时信息模型会主动搜索
 - 可选接入 Obsidian 笔记库，提问时本地检索相关笔记作为参考
@@ -43,10 +50,10 @@
 - 专注中右键显示剩余时间；到点自动触发欢呼庆祝
 
 **主动互动**
-- 河马时不时在头顶冒一个白色气泡关心你（久坐提醒 / 关心陪伴 / 卖萌唠嗑 / 按时段问候），配一声很轻的「叮」，频率与开关可调
+- 桌宠时不时在头顶冒一个白色气泡关心你（久坐提醒 / 关心陪伴 / 卖萌唠嗑 / 按时段问候），配一声很轻的「叮」，频率与开关可调
 
 **拖文件起终端**
-- 把 Finder 的文件/文件夹拖到它身上，河马张嘴吃进去，同时打开 Terminal、`cd` 过去并运行 `claude`
+- 把 Finder 的文件/文件夹拖到它身上，桌宠张嘴吃进去，同时打开 Terminal、`cd` 过去并运行 `claude`
 
 **亲密度系统**
 - 累计聊天和任务完成次数，逐步解锁新表情动作（泪眼婆娑 → 委屈巴巴 → 想贴贴 → 舍不得你 → 美滋滋）
@@ -68,7 +75,7 @@ npm install
 npm start
 ```
 
-启动后河马出现在主屏右下角，**右键 → 退出**。
+启动后桌宠出现在主屏右下角（默认角色：河马），**右键 → 退出**。
 
 ## 配置
 
@@ -76,6 +83,7 @@ npm start
 
 | 想做什么 | 怎么配 |
 | --- | --- |
+| 换个角色 | 右键 → **切换角色**，立即生效；选择会写回 `config.character.id` |
 | 聊天 / 联网搜索 | 填入 API Key（推荐 [OpenRouter](https://openrouter.ai)），再从下拉里选模型；OpenRouter 自动接入联网搜索 |
 | 笔记问答 | 填上你的 Obsidian 库路径，启用本地检索 |
 | 主动互动 | 在面板里开关与调频率，默认开启 |
@@ -86,6 +94,12 @@ npm start
 ## 工作原理
 
 <details>
+<summary>多角色（可插拔皮肤）</summary>
+
+每个角色一个目录：`assets/characters/<id>/{walk,scratch,wave,cheer,roll,expressions}/` + `meta.json`（`{id, name}`）。启动时主进程扫描该目录得到角色列表，当前 id 存在 `config.character.id`（默认 `hema`）；右键菜单切换会写回 config 并通过 IPC 让渲染层重载素材，无需重启。人设/文案里的 `{name}` 占位符在运行时替换为当前角色名，所以一份代码服务所有角色。
+</details>
+
+<details>
 <summary>Claude Code 状态联动</summary>
 
 主进程在 `127.0.0.1:4319` 起一个本地 HTTP 监听；`~/.claude/settings.json`（全局）与本项目 `.claude/settings.json` 里的 hooks 用 `curl` 把会话事件转发过来（桌宠没开时 `curl` 秒失败，完全不影响 Claude Code）。状态按 session 跟踪后合并展示，两份 hooks 并存时按（事件, 会话）600ms 去重。Claude Code 没有真实「百分比」，所以气泡只声称它真正知道的事 —— 还在跑 / 等确认 / 跑完。
@@ -94,7 +108,7 @@ npm start
 <details>
 <summary>拖文件起终端（影子接驳窗）</summary>
 
-两条 macOS 实测规则决定了实现：① 配置过点击穿透的窗口永远收不到拖拽事件；② 拖拽期间系统不派发鼠标事件。所以用一个微型 python 子进程（pyobjc）盯住系统拖拽剪贴板 + 鼠标键状态，发现你在拖文件时，立刻在河马位置显示一个隐形、从未穿透过的「接驳窗」接住投放并转发给河马，松手即隐藏 —— 像素级穿透零损失。落下后通过 `osascript` 打开 Terminal 执行命令。需要系统有 `python3` + `pyobjc`（缺了只影响拖放）。
+两条 macOS 实测规则决定了实现：① 配置过点击穿透的窗口永远收不到拖拽事件；② 拖拽期间系统不派发鼠标事件。所以用一个微型 python 子进程（pyobjc）盯住系统拖拽剪贴板 + 鼠标键状态，发现你在拖文件时，立刻在桌宠位置显示一个隐形、从未穿透过的「接驳窗」接住投放并转发给桌宠，松手即隐藏 —— 像素级穿透零损失。落下后通过 `osascript` 打开 Terminal 执行命令。需要系统有 `python3` + `pyobjc`（缺了只影响拖放）。
 </details>
 
 <details>
@@ -106,14 +120,14 @@ npm start
 ## 项目结构
 
 ```
-main.js              主进程：窗口 / IPC / 菜单 / Claude hook 监听 / 拖文件起终端 / 聊天 / 专注模式 / 设置
+main.js              主进程：窗口 / IPC / 菜单 / 角色切换 / Claude hook 监听 / 拖文件起终端 / 聊天 / 专注模式 / 设置
 preload*.js          各窗口的安全 IPC 桥（pet / chat / settings / catcher）
 renderer/
   pet.js             动画引擎 + 行为状态机 + 拖动/穿透 + Claude 状态气泡 + 主动互动 + 亲密度解锁
   chat.*             聊天面板（浅色气泡 + 输入框）
   settings.*         图形设置面板
   catcher.*          隐形拖放接驳窗
-assets/              各角色精灵动画帧
+assets/characters/   每个角色一个子目录（walk / scratch / wave / cheer / roll / expressions + meta.json）
 config.example.json  配置模板
 ```
 

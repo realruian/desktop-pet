@@ -1,7 +1,7 @@
 {
   "name": "hema-desktop-pet",
   "version": "0.1.0",
-  "description": "A cute pixel Hema (hippo) desktop pet for macOS (Electron): draggable, wanders randomly, transparent click-through window.",
+  "description": "A multi-character pixel desktop pet for macOS (Electron): swap skins from a right-click menu (hippo, Pikachu, Luffy, Zoro, etc.), draggable, wanders randomly, transparent click-through window, with a Claude Code status bubble.",
   "main": "main.js",
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron ."

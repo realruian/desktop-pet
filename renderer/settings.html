@@ -88,34 +88,30 @@
           <span class="label">模型</span>
           <select id="model">
             <optgroup label="Anthropic Claude">
-              <option value="anthropic/claude-opus-4.8">Claude Opus 4.8（旗舰）</option>
-              <option value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6（均衡主力）</option>
+              <option value="anthropic/claude-opus-4.1">Claude Opus 4.1（旗舰）</option>
+              <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5（均衡主力）</option>
               <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5（快·省）</option>
             </optgroup>
             <optgroup label="OpenAI">
-              <option value="openai/gpt-5.5">GPT-5.5（旗舰）</option>
-              <option value="openai/gpt-5.4-mini">GPT-5.4 mini（快·省）</option>
+              <option value="openai/gpt-5">GPT-5（旗舰）</option>
+              <option value="openai/gpt-5-mini">GPT-5 mini（快·省）</option>
               <option value="openai/o4-mini">o4-mini（推理）</option>
             </optgroup>
             <optgroup label="Google Gemini">
               <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-              <option value="google/gemini-3.5-flash">Gemini 3.5 Flash（快）</option>
+              <option value="google/gemini-2.5-flash">Gemini 2.5 Flash（快）</option>
             </optgroup>
             <optgroup label="DeepSeek">
-              <option value="deepseek/deepseek-v4-flash">DeepSeek V4 Flash（热门·快）</option>
-              <option value="deepseek/deepseek-v4-pro">DeepSeek V4 Pro</option>
+              <option value="deepseek/deepseek-chat">DeepSeek Chat (V3)</option>
+              <option value="deepseek/deepseek-r1">DeepSeek R1（推理）</option>
             </optgroup>
             <optgroup label="Moonshot Kimi">
-              <option value="moonshotai/kimi-k2.6">Kimi K2.6</option>
-              <option value="moonshotai/kimi-k2.5">Kimi K2.5</option>
+              <option value="moonshotai/kimi-k2">Kimi K2</option>
             </optgroup>
             <optgroup label="其它主流">
-              <option value="qwen/qwen3.7-max">Qwen3.7 Max</option>
-              <option value="qwen/qwen3.6-flash">Qwen3.6 Flash（快·省）</option>
-              <option value="z-ai/glm-5">GLM-5</option>
-              <option value="z-ai/glm-4.7">GLM-4.7</option>
-              <option value="minimax/minimax-m3">MiniMax M3</option>
-              <option value="x-ai/grok-4.3">Grok 4.3</option>
+              <option value="qwen/qwen3-235b-a22b-2507">Qwen3 235B</option>
+              <option value="z-ai/glm-4.6">GLM-4.6</option>
+              <option value="x-ai/grok-4">Grok 4</option>
               <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
             </optgroup>
             <option value="__custom__">自定义（手动输入 ID）…</option>
@@ -127,7 +123,7 @@
             placeholder="vendor/model-id，如 deepseek/deepseek-chat"
             hidden
           />
-          <span class="hint" id="modelHint">选一个主流模型；ID 在 OpenRouter / AiHubMix 通用</span>
+          <span class="hint" id="modelHint">选一个主流模型；ID 在 OpenRouter / AiHubMix 通用，列表可能滞后于平台，不在的请选「自定义」手填</span>
         </div>
 
         <label class="field">
