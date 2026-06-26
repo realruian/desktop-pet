@@ -81,11 +81,19 @@ const REST = 'rest';
 // any session waiting beats working; multiple running shows a ＋N suffix;
 // each completion flashes done with that task's label (and a wave), then the
 // chip returns to the remaining tasks or fades away.
-const CHIP_H = 22;  // 气泡主体高度；河马头顶约在 y≈21
-const CHIP_TAIL = 6;// 气泡尾巴高度，尖端指向河马头
+// 气泡体量加大到接近 Codex：14px 主字、留白足。两行（项目名 + 状态词）用 H2，
+// 单行（主动互动文案 / 解锁通知）用 H1。河马头顶约 y40，两行会轻微贴到额头，
+// 尾巴正好落在头上。
+const CHIP_H1 = 30; // 单行气泡高度
+const CHIP_H2 = 38; // 两行气泡高度（项目名 + 状态词）——压两像素，离头远一点
+const CHIP_TAIL = 4;// 气泡尾巴高度，尖端指向河马头（缩短，给头顶让出几像素）
 const CHIP_Y = 0;   // 气泡顶部
-const CHIP_PAD = 8; // 左右内边距
-const CHIP_LABEL_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif';
+const CHIP_PAD = 11; // 左右内边距
+const CHIP_LABEL_FONT = '14px -apple-system, "PingFang SC", system-ui, sans-serif';
+const CHIP_SUB_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif';
+// 主动互动单行文案用更小字号，让一句关心话在 160 窗口里完整显示不截断
+// （也和大字号的 Claude 任务气泡形成主次）。
+const CHIP_SPEECH_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif';
 const CHIP_FADE_MS = 450; // chip fade-out once everything is done
 const DONE_FLASH_MS = 2200; // how long each task's done flash holds
 const SESSION_STALE_MS = 15 * 60 * 1000; // forget sessions silent this long
@@ -524,104 +532,133 @@ function drawHeart(cx, cy, s, color) {
   ctx.fill();
 }
 
-// 河马头顶的对话气泡——白色圆角矩形 + 向下的小三角尾巴，比黑色胶囊更契合宠物气质。
-// 白底深字在任何壁纸上都清晰；尾巴尖端落在河马额头处，视觉上像「河马在说话」。
-// 宽度随文案自适应（指示器 + 文字 + 可选 ＋N），整体居中于河马头顶。
-function drawStatusChip(now, alpha, mode, label, suffix) {
+// 河马头顶的对话气泡——白色圆角卡片 + 向下尾巴。两种形态：
+//   · 有项目名（Claude 任务）→ 两行：项目名（上、主、深色 14px）+ 状态词（下、辅、
+//     浅灰 11px，如「进行中 / 等你确认 / 完成」），指示器在左侧垂直居中。
+//   · 无项目名（主动互动文案 / 解锁通知）→ 单行：指示器 + 文案。
+// 宽度随内容自适应（取两行较宽者），整体居中于河马头顶。
+const CHIP_GAP = 8; // 指示器与文字间距
+const CHIP_IND_R = 5.5; // 指示器（含转圈底环）半径
+function drawStatusChip(now, alpha, mode, project, status, suffix) {
   const color = CHIP_COLOR[mode] || CHIP_COLOR.working;
+  const twoLine = !!project; // 有项目名 → 两行
+  const H = twoLine ? CHIP_H2 : CHIP_H1;
   const by = CHIP_Y + 1;
-  const r  = CHIP_H / 2;          // 全圆角胶囊
-  const cx = WIN / 2;             // 水平中心（尾巴对准河马头）
+  const r = Math.min(14, H / 2); // 适中圆角（不是全胶囊），更像 Codex 卡片
+  const cx = WIN / 2; // 水平中心（尾巴对准河马头）
+  const MAX_W = WIN - 12; // 气泡最大宽（受 160 窗口限制）
+  // 指示器钉在左上角、与气泡左上圆角同心（上边距=左边距=r-CHIP_IND_R）；
+  // 文字从指示器右侧 CHIP_GAP 处起。
+  const indBlock = r + CHIP_IND_R + CHIP_GAP;
 
   ctx.save();
-
-  // 先量文字以决定气泡宽度
-  ctx.font = CHIP_LABEL_FONT;
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  const IND_W = 8;                // 指示器视觉直径
-  const GAP   = 6;                // 指示器与文字间距
-  const MAX_W = WIN - 12;         // 气泡最大宽（窗口宽留两侧外边距）
-  const sufW  = suffix ? ctx.measureText(suffix).width + 3 : 0;
-  const innerMax = MAX_W - CHIP_PAD * 2 - IND_W - GAP - sufW;
-  const text  = ellipsize(label || 'Claude', innerMax);
-  const textW = ctx.measureText(text).width;
-  const chipW = Math.min(MAX_W, CHIP_PAD * 2 + IND_W + GAP + textW + sufW);
+
+  // 量宽：项目名（14px）与状态/单行文字分别量，取较宽者。
+  ctx.font = CHIP_LABEL_FONT;
+  const sufW = suffix ? ctx.measureText(suffix).width + 4 : 0;
+  const line1 = twoLine
+    ? ellipsize(project, MAX_W - indBlock - CHIP_PAD - sufW)
+    : '';
+  const line1W = twoLine ? ctx.measureText(line1).width : 0;
+  ctx.font = twoLine ? CHIP_SUB_FONT : CHIP_SPEECH_FONT;
+  const line2 = ellipsize(status || 'Claude', MAX_W - indBlock - CHIP_PAD);
+  const line2W = ctx.measureText(line2).width;
+
+  const textW = Math.max(line1W + sufW, line2W);
+  const chipW = Math.min(MAX_W, indBlock + textW + CHIP_PAD);
   const bx = (WIN - chipW) / 2;
 
   ctx.globalAlpha = alpha;
 
-  // 气泡主体（白色圆角矩形）—— 不加 canvas 阴影：blur 在透明窗上会发灰发脏
+  // 气泡主体（白色圆角卡片）—— 不加 canvas 阴影：blur 在透明窗上会发灰发脏
   ctx.beginPath();
-  ctx.roundRect(bx, by, chipW, CHIP_H, r);
+  ctx.roundRect(bx, by, chipW, H, r);
   ctx.fillStyle = 'rgba(255,255,255,0.98)';
   ctx.fill();
 
   // 尾巴三角，与主体底部无缝衔接
   ctx.beginPath();
-  ctx.moveTo(cx - 5, by + CHIP_H - 1);
-  ctx.lineTo(cx + 5, by + CHIP_H - 1);
-  ctx.lineTo(cx,     by + CHIP_H + CHIP_TAIL);
+  ctx.moveTo(cx - 5, by + H - 1);
+  ctx.lineTo(cx + 5, by + H - 1);
+  ctx.lineTo(cx, by + H + CHIP_TAIL);
   ctx.closePath();
   ctx.fill();
 
   // 极淡边框勾轮廓（替代阴影做层次）
   ctx.beginPath();
-  ctx.roundRect(bx + 0.5, by + 0.5, chipW - 1, CHIP_H - 1, r);
+  ctx.roundRect(bx + 0.5, by + 0.5, chipW - 1, H - 1, r);
   ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-  ctx.lineWidth   = 1;
+  ctx.lineWidth = 1;
   ctx.stroke();
 
-  // 状态指示器（彩色，在气泡左侧）
-  const ix = bx + CHIP_PAD + IND_W / 2;
-  const iy = by + CHIP_H / 2;
+  // 状态指示器：钉在左上角，与气泡左上圆角同心。
+  const ix = bx + r;
+  const iy = by + r;
 
   if (mode === 'working') {
-    // 蓝色转圈：约 0.8 圈/秒
+    // 同心 loading 环：浅色底环（轨道）+ 彩色转动弧，约 0.8 圈/秒
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(ix, iy, CHIP_IND_R, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.stroke();
     const a0 = (now / 1250) * 2 * Math.PI;
     ctx.beginPath();
-    ctx.arc(ix, iy, 3.5, a0, a0 + Math.PI * 1.5);
+    ctx.arc(ix, iy, CHIP_IND_R, a0, a0 + Math.PI * 1.4);
     ctx.strokeStyle = color;
-    ctx.lineWidth   = 1.6;
-    ctx.lineCap     = 'round';
     ctx.stroke();
   } else if (mode === 'waiting') {
     // 琥珀色脉冲点：需要你来确认
     const pulse = 0.6 + 0.4 * Math.sin(now / 280);
     ctx.beginPath();
-    ctx.arc(ix, iy, 3.5, 0, 2 * Math.PI);
-    ctx.fillStyle   = color;
+    ctx.arc(ix, iy, 4.5, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
     ctx.globalAlpha = alpha * pulse;
     ctx.fill();
     ctx.globalAlpha = alpha;
   } else if (mode === 'speech') {
     // 主动互动：粉色小爱心，随呼吸轻微缩放
     const beat = 1 + 0.12 * Math.sin(now / 320);
-    drawHeart(ix, iy, 3.6 * beat, '#ff6b9d');
+    drawHeart(ix, iy, 4.6 * beat, '#ff6b9d');
   } else {
     // 完成：绿色圆 + 白色对勾
     ctx.beginPath();
-    ctx.arc(ix, iy, 3.8, 0, 2 * Math.PI);
+    ctx.arc(ix, iy, 4.8, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(ix - 1.8, iy + 0.2);
-    ctx.lineTo(ix - 0.4, iy + 1.6);
-    ctx.lineTo(ix + 2.0, iy - 1.5);
-    ctx.strokeStyle  = '#fff';
-    ctx.lineWidth    = 1.3;
-    ctx.lineCap      = 'round';
-    ctx.lineJoin     = 'round';
+    ctx.moveTo(ix - 2.2, iy + 0.2);
+    ctx.lineTo(ix - 0.5, iy + 2.0);
+    ctx.lineTo(ix + 2.5, iy - 1.9);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.stroke();
   }
 
-  // 文字（深色，白底可读）
-  const tx = bx + CHIP_PAD + IND_W + GAP;
-  ctx.fillStyle = 'rgba(20,20,30,0.85)';
-  ctx.fillText(text, tx, iy);
-  if (suffix) {
-    ctx.fillStyle = 'rgba(20,20,30,0.42)';
-    ctx.fillText(suffix, tx + textW + 3, iy);
+  const tx = bx + indBlock;
+  if (twoLine) {
+    // 两行：项目名（主，深色）+ 状态词（辅，浅灰）
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = CHIP_LABEL_FONT;
+    ctx.fillStyle = 'rgba(20,20,30,0.88)';
+    ctx.fillText(line1, tx, by + 16);
+    if (suffix) {
+      ctx.fillStyle = 'rgba(20,20,30,0.4)';
+      ctx.fillText(suffix, tx + line1W + 4, by + 16);
+    }
+    ctx.font = CHIP_SUB_FONT;
+    ctx.fillStyle = 'rgba(20,20,30,0.5)';
+    ctx.fillText(line2, tx, by + 30);
+  } else {
+    // 单行：指示器 + 文案，垂直居中
+    ctx.textBaseline = 'middle';
+    ctx.font = CHIP_SPEECH_FONT;
+    ctx.fillStyle = 'rgba(20,20,30,0.85)';
+    ctx.fillText(line2, tx, iy + 0.5);
   }
 
   ctx.restore();
@@ -634,44 +671,50 @@ function drawOverlay(now) {
   // Chip visibility: a fresh completion flashes done (+ its task label) for
   // DONE_FLASH_MS and takes precedence; otherwise working/waiting persist;
   // after the last task the flash fades the chip away; idle → nothing.
+  // Claude 任务气泡两行：project（项目名，常驻）+ status（状态词）。
+  // 单行场景（解锁通知 / 主动互动）只用 status，project 留空。
   let chipAlpha = 0;
   let mode = null;
-  let label = '';
+  let project = '';
+  let status = '';
   let suffix = '';
   if (now < unlockNotice.until) {
     mode = 'done';
-    label = unlockNotice.label;
+    status = unlockNotice.label;
     chipAlpha = 1;
   } else if (now < unlockNotice.until + CHIP_FADE_MS) {
     mode = 'done';
-    label = unlockNotice.label;
+    status = unlockNotice.label;
     chipAlpha = 1 - (now - unlockNotice.until) / CHIP_FADE_MS;
   } else if (now < claude.doneUntil) {
     mode = 'done';
-    label = '完成啦～';   // 庆祝文案，比项目名更有温度
+    project = claude.doneLabel || 'Claude';
+    status = '完成';
     chipAlpha = 1;
   } else if (claude.display === 'working' || claude.display === 'waiting') {
     mode = claude.display;
-    label = mode === 'waiting' ? '等你确认！' : (claude.taskLabel || 'Claude');
+    project = claude.taskLabel || 'Claude';
+    status = mode === 'waiting' ? '等你确认' : '进行中';
     if (claude.taskExtra > 0) suffix = '＋' + claude.taskExtra;
     chipAlpha = 1;
   } else if (now < claude.doneUntil + CHIP_FADE_MS) {
     mode = 'done';
-    label = '完成啦～';
+    project = claude.doneLabel || 'Claude';
+    status = '完成';
     chipAlpha = 1 - (now - claude.doneUntil) / CHIP_FADE_MS;
   }
   // 主动互动气泡：最低优先级——只有在没有任何 Claude/解锁状态时才冒出来。
   if (!mode && now < speechBubble.until) {
     mode = 'speech';
-    label = speechBubble.text;
+    status = speechBubble.text;
     chipAlpha = 1;
   } else if (!mode && now < speechBubble.until + SPEECH_FADE_MS) {
     mode = 'speech';
-    label = speechBubble.text;
+    status = speechBubble.text;
     chipAlpha = 1 - (now - speechBubble.until) / SPEECH_FADE_MS;
   }
   if (chipAlpha > 0.01 && mode)
-    drawStatusChip(now, chipAlpha, mode, label, suffix);
+    drawStatusChip(now, chipAlpha, mode, project, status, suffix);
 
   // Drop-hover cue: a folder glyph centered over the pet inviting the drop (E).
   if (dropHover) {
