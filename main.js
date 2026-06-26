@@ -401,6 +401,34 @@ ipcMain.on('show-menu', () => {
         click: () => setCharacter(c.id),
       })),
     },
+    // 亲密度子菜单：展示聊天/任务计数和已解锁表情进度。
+    (() => {
+      const b = bondSummary;
+      if (!b) return { label: '亲密度', enabled: false };
+      const UNLOCKS = [
+        { clip: 'tearful',  label: '泪眼婆娑', chatCount: 3  },
+        { clip: 'tearful2', label: '委屈巴巴', chatCount: 10 },
+        { clip: 'tearful3', label: '想贴贴',   taskCount: 5  },
+        { clip: 'tearful4', label: '舍不得你', taskCount: 15 },
+        { clip: 'cheer',    label: '美滋滋',   taskCount: 20 },
+      ];
+      const unlocked = new Set(b.unlocked || []);
+      const next = UNLOCKS.find((e) => !unlocked.has(e.clip));
+      const nextHint = next
+        ? (next.chatCount !== undefined
+            ? `下一个：${next.label}（聊天 ${next.chatCount} 次）`
+            : `下一个：${next.label}（任务完成 ${next.taskCount} 次）`)
+        : '全部解锁！';
+      return {
+        label: `亲密度（${unlocked.size}/${UNLOCKS.length}）`,
+        submenu: [
+          { label: `聊天次数：${b.chatCount}`, enabled: false },
+          { label: `任务完成：${b.taskCount}`, enabled: false },
+          { type: 'separator' },
+          { label: nextHint, enabled: false },
+        ],
+      };
+    })(),
     {
       label: '设置',
       click: () => openSettings(),
