@@ -95,7 +95,7 @@ const CHIP_SUB_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif'
 // （也和大字号的 Claude 任务气泡形成主次）。
 const CHIP_SPEECH_FONT = '11px -apple-system, "PingFang SC", system-ui, sans-serif';
 const CHIP_FADE_MS = 450; // chip fade-out once everything is done
-const DONE_FLASH_MS = 2200; // how long each task's done flash holds
+const DONE_FLASH_MS = 6000; // 完成气泡停留时间（延长到 6s，让用户来得及看到）
 const SESSION_STALE_MS = 15 * 60 * 1000; // forget sessions silent this long
 const CHIP_COLOR = {
   working: '#7aa2ff', // calm blue — running
@@ -662,15 +662,17 @@ function drawStatusChip(now, alpha, mode, project, status, suffix) {
     const beat = 1 + 0.12 * Math.sin(now / 320);
     drawHeart(ix, iy, 4.6 * beat, '#ff6b9d');
   } else {
-    // 完成：绿色圆 + 白色对勾
+    // 完成：绿色实心圆（半径与 working 环外边缘一致）+ 白色对勾（等比缩放）
+    const cr = CHIP_IND_R - 0.5; // 比环外边缘稍小一点，视觉等大
+    const ck = cr / 4.8; // 对勾坐标缩放系数（原始基于 r=4.8 绘制）
     ctx.beginPath();
-    ctx.arc(ix, iy, 4.8, 0, 2 * Math.PI);
+    ctx.arc(ix, iy, cr, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(ix - 2.2, iy + 0.2);
-    ctx.lineTo(ix - 0.5, iy + 2.0);
-    ctx.lineTo(ix + 2.5, iy - 1.9);
+    ctx.moveTo(ix - 2.2 * ck, iy + 0.2 * ck);
+    ctx.lineTo(ix - 0.5 * ck, iy + 2.0 * ck);
+    ctx.lineTo(ix + 2.5 * ck, iy - 1.9 * ck);
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.6;
     ctx.lineCap = 'round';
@@ -1246,6 +1248,23 @@ window.pet.onMenuCommand((cmd) => {
     }
   } else if (cmd === 'demo') {
     runDemo();
+  } else if (cmd.startsWith('focus-start-label:')) {
+    // 进入专注：冒个鼓励气泡。label 由主进程传来（如「10 秒」「25 分钟」）。
+    const label = cmd.slice('focus-start-label:'.length);
+    speechBubble.text = '开始专注 ' + label + '，加油！';
+    speechBubble.until = performance.now() + SPEECH_HOLD_MS;
+  } else if (cmd === 'focus-stop') {
+    // 用户中途退出专注：给个轻提示，不庆祝。
+    speechBubble.text = '专注结束啦';
+    speechBubble.until = performance.now() + SPEECH_HOLD_MS;
+  } else if (cmd === 'focus-done') {
+    // 到点：高优先级通知气泡 + 强制播 cheer 庆祝（不受表情解锁限制）。
+    const now = performance.now();
+    unlockNotice.label = '专注完成！🎉';
+    unlockNotice.until = now + DONE_FLASH_MS;
+    if (!state.paused && !state.dragging && !claudeHolding()) {
+      playExpression('cheer');
+    }
   }
 });
 
@@ -1343,7 +1362,7 @@ function applyClaudeBody(display) {
     setClip('scratch'); // 抱臂待机，loopTarget=0 → 开放循环，定格保持
   } else if (display === 'working') {
     walkTarget = null; // 原地，不位移
-    setClip('walk', { loopTarget: 3 }); // 踏步 3 轮 → onActivityDone 接回 eyes
+    setClip('walk', { loopTarget: 0 }); // 无限踏步，直到任务完成才停
   } else {
     setClip(REST);
   }
@@ -1354,9 +1373,10 @@ function applyClaudeBody(display) {
 function fireClaudeDone(label) {
   claude.doneLabel = label || '任务完成';
   claude.doneUntil = performance.now() + DONE_FLASH_MS;
+  playDingDone(); // 叮叮——任务完成提示音
   if (!state.dragging && !state.paused) {
-    state.activitiesLeft = 1; // 一次庆祝（review：任务完成、结果就绪）
-    setClip('cheer', { loopTarget: 1 });
+    // loopTarget: 3 → cheer 循环约 3 次，配合 6s 气泡，视觉上更明显
+    setClip('cheer', { loopTarget: 3 });
   }
 }
 
@@ -1536,6 +1556,33 @@ function playDing() {
     osc.connect(gain).connect(audioCtx.destination);
     osc.start(t);
     osc.stop(t + 0.55);
+  } catch (_) {
+    /* 没声音也不影响 */
+  }
+}
+
+// 任务完成专用叮声：两个短促上升音（叮-叮），比 idle chatter 的叮声更明显。
+function playDingDone() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime;
+    // 两声：C5(523Hz)→E5(659Hz)，间隔 0.18s
+    [[523, 659, 0], [587, 784, 0.18]].forEach(([f0, f1, delay]) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f0, t + delay);
+      osc.frequency.exponentialRampToValueAtTime(f1, t + delay + 0.08);
+      gain.gain.setValueAtTime(0.0001, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.12, t + delay + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.45);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.5);
+    });
   } catch (_) {
     /* 没声音也不影响 */
   }
