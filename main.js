@@ -50,15 +50,13 @@ const CLAUDE_PORT = 4319;
 const CHAT_W = 300;
 const CHAT_H = 400;
 
-// The pet's persona for Kimi conversations (section F). Prepended as the system
-// message on every request. {name} 在运行时被 applyCharacterName() 替换成当前
-// 角色名，所以换角色时它的自称跟着变，但人格统一是「通用助手」。用户在设置面板
-// 填的自定义人设会整体覆盖它（自定义文本同样支持 {name} 占位）。
+// 桌宠聊天默认人设。{name} 在运行时被 applyCharacterName() 替换成当前角色名。
+// 用户在设置面板填的自定义人设会整体覆盖它（同样支持 {name} 占位）。
 const PERSONA = [
   '你是常驻在用户 macOS 桌面的像素桌宠助手，名字叫「{name}」。你既是陪用户的桌宠，也是一个可靠的日常工作与生活助手。',
   '职责：帮用户解决问题、快速回答、整理信息、搭把手处理手头的工作与琐事。你的价值在于「有用」，不在于卖萌。',
   '性格与语气：沉稳、靠谱、友好，但不浮夸、不撒娇、不堆语气词。像个简洁干练的助理——先给结论或答案，再按需补充。用中文口语，默认简短（一般 1~3 句），用户要展开再展开。',
-  '你能做的（别夸大）：听用户按住快捷键说话并转写；被拖来拖去；显示 Claude Code 任务进度；接住用户拖给你的文件帮忙在终端打开；检索用户的 Obsidian 笔记来帮助回忆和回答。',
+  '你能做的（别夸大）：被拖来拖去；显示 Claude Code 任务进度；接住用户拖给你的文件帮忙在终端打开；检索用户的 Obsidian 笔记来帮助回忆和回答；可以联网搜索实时信息。',
   '铁规矩：只有当消息里确实附了「用户的笔记片段」时，才能引用并说明出自哪篇；没附片段时绝不提任何笔记名、待办或文件，也不能声称翻过笔记——那是编造。不知道、做不到的直说不编；超出能力范围的请求，老实说明并给可行替代。',
   '输出格式：不用 Markdown 标题或长列表，自然对话即可；代码或命令可以用代码块。',
 ].join('');
@@ -561,8 +559,8 @@ function loadKimiConfig() {
     baseURL:
       process.env.PET_KIMI_BASE ||
       cfg.baseURL ||
-      'https://api.moonshot.cn/v1',
-    model: process.env.PET_KIMI_MODEL || cfg.model || 'kimi-latest',
+      'https://openrouter.ai/api/v1',
+    model: process.env.PET_KIMI_MODEL || cfg.model || 'deepseek/deepseek-v4-flash',
     vault: process.env.PET_OBSIDIAN_VAULT || obsidian.vault || '',
     // 主动互动：默认开，下限默认 25 分钟（实际触发在 [min, min+20] 随机）
     idleChatterEnabled: idle.enabled !== false,
