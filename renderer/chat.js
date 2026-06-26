@@ -14,7 +14,6 @@ const HISTORY_LIMIT = 20;
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
-const micEl = document.getElementById('mic');
 const closeEl = document.getElementById('close');
 const clearEl = document.getElementById('clear');
 
@@ -106,79 +105,7 @@ function autosize() {
   inputEl.style.height = inputEl.scrollHeight + 'px';
 }
 
-// ---- 语音输入（Web Speech API）----------------------------------------------
-// 直接调 Chromium 内置语音识别，不走后端 API，无需额外 Key。
-// 按钮按下开始识别，再按或松开 PTT 键停止；识别结果直接走 sendMessage。
-
 const placeholderIdle = () => `跟${petName}说点什么…`;
-const placeholderPtt = () => `${petName}在听…松开按键自动发送`;
-let pttActive = false;
-
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let srec = null; // 当前识别会话，null = 未在识别
-
-async function startRecognition() {
-  if (srec) return;
-  if (!SR) {
-    addBubble('error', '当前版本不支持语音识别，请手动打字。');
-    return;
-  }
-  try {
-    await window.chat.ensureMic();
-  } catch (_) {
-    addBubble('error', '用不了麦克风：去 系统设置 → 隐私与安全性 → 麦克风 允许本应用后再试。');
-    return;
-  }
-  srec = new SR();
-  srec.lang = 'zh-CN';
-  srec.interimResults = false;
-  srec.maxAlternatives = 1;
-  micEl.classList.add('recording');
-  inputEl.placeholder = `${petName}在听…`;
-
-  srec.onresult = (e) => {
-    const text = e.results[0][0].transcript.trim();
-    if (text) sendMessage(text);
-  };
-  srec.onerror = (e) => {
-    // no-speech = 没说话，正常情况；aborted = 手动停止，都不报错
-    if (e.error !== 'aborted' && e.error !== 'no-speech') {
-      addBubble('error', `语音识别出错（${e.error}），再试一次？`);
-    }
-  };
-  srec.onend = () => {
-    srec = null;
-    micEl.classList.remove('recording');
-    inputEl.placeholder = placeholderIdle();
-    pttActive = false;
-  };
-  srec.start();
-}
-
-function stopRecognition() {
-  if (srec) srec.stop();
-}
-
-function toggleRecording() {
-  srec ? stopRecognition() : startRecognition();
-}
-
-micEl.addEventListener('click', toggleRecording);
-
-// PTT（全局快捷键，由 main 推送）：按下开始，松开停止，再按同样停。
-window.chat.onPTT(() => {
-  if (srec) {
-    stopRecognition();
-  } else {
-    pttActive = true;
-    startRecognition();
-  }
-});
-
-// PTT 松开任意键即停（焦点在聊天窗时捕获到 keyup）。
-window.addEventListener('keyup', () => {
-  if (pttActive && srec) stopRecognition();
-});
 
 sendEl.addEventListener('click', () => sendMessage());
 inputEl.addEventListener('input', autosize);

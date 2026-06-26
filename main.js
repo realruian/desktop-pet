@@ -63,14 +63,6 @@ const PERSONA = [
   '输出格式：不用 Markdown 标题或长列表，自然对话即可；代码或命令可以用代码块。',
 ].join('');
 
-// Transcription instruction for the STT model (an audio-input chat model on
-// the same OpenAI-compatible endpoint — no extra account needed). {name} 同样
-// 在使用处被替换成当前角色名，作为转写热词。
-const STT_PROMPT =
-  '请把这段语音逐字转写成简体中文文字。只输出转写结果本身，' +
-  '不要任何解释、引号或前后缀；语音里夹杂的英文按原样保留。' +
-  '热词提示：说话人养的桌面宠物叫「{name}」，听到相近发音时优先写作「{name}」。';
-
 // ---- 角色（桌宠皮肤）---------------------------------------------------------
 // 每个角色的动作帧都在 assets/characters/<id>/{walk,scratch,...}，外加一份
 // meta.json（{id, name}）。当前角色 id 存在 config.character.id（默认 hema），
@@ -546,8 +538,6 @@ function looksLikeRealKey(k) {
 function loadKimiConfig() {
   let cfg = {};
   let obsidian = {};
-  let stt = {};
-  let hotkey = {};
   let idle = {};
   for (const p of CONFIG_PATHS) {
     try {
@@ -555,8 +545,6 @@ function loadKimiConfig() {
       const parsed = JSON.parse(raw) || {};
       cfg = parsed.kimi || {};
       obsidian = parsed.obsidian || {};
-      stt = parsed.stt || {};
-      hotkey = parsed.hotkey || {};
       idle = parsed.idle || {};
       break; // first existing config wins (userData, then repo checkout)
     } catch (_) {
@@ -574,9 +562,6 @@ function loadKimiConfig() {
       'https://api.moonshot.cn/v1',
     model: process.env.PET_KIMI_MODEL || cfg.model || 'kimi-latest',
     vault: process.env.PET_OBSIDIAN_VAULT || obsidian.vault || '',
-    sttModel:
-      process.env.PET_STT_MODEL || stt.model || 'google/gemini-2.5-flash',
-    pttHotkey: process.env.PET_PTT_HOTKEY || hotkey.ptt || 'Alt+Space',
     // 主动互动：默认开，下限默认 25 分钟（实际触发在 [min, min+20] 随机）
     idleChatterEnabled: idle.enabled !== false,
     idleChatterMin: Number(idle.minMinutes) || 25,
@@ -1169,92 +1154,6 @@ ipcMain.handle('chat-send', async (_e, messages) => {
 // (port busy, bad payload, …) is logged once and ignored so the pet keeps
 // working without the integration.
 
-// Voice input (section G): the chat renderer records the mic, downsamples to
-// 16k mono WAV, and hands the base64 here; we transcribe it through an
-// audio-input chat model on the SAME OpenAI-compatible endpoint (no extra
-// account), and the transcript then flows through the normal chat path.
-
-// macOS microphone permission. Must be requested from the main process; the
-// renderer calls this right before its first getUserMedia.
-ipcMain.handle('ensure-mic', async () => {
-  try {
-    if (process.platform === 'darwin') {
-      return await systemPreferences.askForMediaAccess('microphone');
-    }
-    return true;
-  } catch (_) {
-    return true; // let getUserMedia surface the real error
-  }
-});
-
-// Transcribe a base64 16k-mono WAV → { ok, text } | { ok, error }.
-ipcMain.handle('chat-transcribe', async (_e, b64wav) => {
-  const { apiKey, baseURL, sttModel } = loadKimiConfig();
-  if (!looksLikeRealKey(apiKey)) {
-    openSettings();
-    return { ok: false, error: '还没填 API Key——已经帮你打开设置面板。' };
-  }
-  if (typeof b64wav !== 'string' || b64wav.length < 1000) {
-    return { ok: false, error: '没录到声音，再试一次？' };
-  }
-  if (b64wav.length > 12 * 1024 * 1024) {
-    return { ok: false, error: '录音太长了，一次最多 1 分钟左右哦。' };
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 45000);
-  try {
-    const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + apiKey,
-      },
-      body: JSON.stringify({
-        model: sttModel,
-        temperature: 0,
-        max_tokens: 500,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: applyCharacterName(STT_PROMPT) },
-              {
-                type: 'input_audio',
-                input_audio: { data: b64wav, format: 'wav' },
-              },
-            ],
-          },
-        ],
-      }),
-      signal: ctrl.signal,
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const detail =
-        (data && data.error && data.error.message) || 'HTTP ' + resp.status;
-      return { ok: false, error: '听写接口报错：' + detail };
-    }
-    const text =
-      data &&
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content;
-    if (!text || !text.trim()) {
-      return { ok: false, error: '没听清，再说一遍？' };
-    }
-    return { ok: true, text: text.trim() };
-  } catch (err) {
-    const msg =
-      err && err.name === 'AbortError'
-        ? '听写超时——网络或服务暂时不可用。'
-        : '网络错误：' + ((err && err.message) || String(err));
-    return { ok: false, error: msg };
-  } finally {
-    clearTimeout(timer);
-  }
-});
-
 // Hooks may be registered BOTH globally (~/.claude/settings.json — every
 // project) and in this repo's .claude/settings.json (works out of the box for
 // cloners); a session in this project then POSTs each event twice, near-
@@ -1653,29 +1552,8 @@ app.whenReady().then(() => {
   // Dev-only eval/capture bridge; inert unless PET_TEST_PORT is set.
   startTestBridge();
 
-  // Pre-create the (hidden) chat window so push-to-talk pops it instantly.
+  // Pre-create the (hidden) chat window so double-click pops it instantly.
   createChatWindow();
-
-  // Push-to-talk (section G): a GLOBAL hotkey — hold to record from anywhere.
-  // Electron only reports key-DOWN for global shortcuts, so the release is
-  // detected by the (now focused) chat renderer via keyup; pressing the hotkey
-  // again also stops, as does the 60s cap. Configurable: config.json
-  // hotkey.ptt (Electron accelerator format), default Alt+Space.
-  const { pttHotkey } = loadKimiConfig();
-  try {
-    const ok = globalShortcut.register(pttHotkey, () => {
-      openChat();
-      if (chatWin) chatWin.webContents.send('ptt-down');
-    });
-    console.log(
-      '[ptt] ' +
-        (ok
-          ? 'hotkey registered: ' + pttHotkey
-          : 'hotkey unavailable (in use by another app): ' + pttHotkey)
-    );
-  } catch (err) {
-    console.log('[ptt] hotkey registration failed: ' + err.message);
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
