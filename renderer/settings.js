@@ -1,5 +1,5 @@
 // settings.js — 设置面板渲染层。表单装填、服务商预设、模型拉取、人设、
-// 唤醒开关、测试连接、保存。真正读写都在主进程（preload-settings 桥过去）。
+// 测试连接、保存。真正读写都在主进程（preload-settings 桥过去）。
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -14,9 +14,6 @@ const els = {
   resetPersona: $('resetPersona'),
   vault: $('vault'),
   pickVault: $('pickVault'),
-  wakeEnabled: $('wakeEnabled'),
-  wakeThreshold: $('wakeThreshold'),
-  wakeLabel: $('wakeLabel'),
   idleChatterEnabled: $('idleChatterEnabled'),
   idleChatterMin: $('idleChatterMin'),
   idleChatterLabel: $('idleChatterLabel'),
@@ -91,8 +88,6 @@ function currentPatch() {
     baseURL: els.baseURL.value.trim(),
     persona: els.persona.value,
     vault: els.vault.value.trim(),
-    wakeEnabled: els.wakeEnabled.checked,
-    wakeThreshold: parseFloat(els.wakeThreshold.value) || 0.2,
     idleChatterEnabled: els.idleChatterEnabled.checked,
     idleChatterMin: parseInt(els.idleChatterMin.value, 10) || 25,
   };
@@ -105,11 +100,6 @@ function syncPresetActive() {
   els.presetAiHubMix.classList.toggle('active', b.includes('aihubmix.com'));
 }
 
-// 唤醒开关旁的「开启/关闭」文字跟着 checkbox 走。
-function updateWakeLabel() {
-  els.wakeLabel.textContent = els.wakeEnabled.checked ? '开启' : '关闭';
-}
-
 // 进入面板时拉一次当前配置铺到表单里
 async function refill() {
   try {
@@ -120,13 +110,9 @@ async function refill() {
     els.vault.value = cfg.vault || '';
     els.persona.value = cfg.persona || '';
     defaultPersona = cfg.defaultPersona || '';
-    els.wakeEnabled.checked = !!cfg.wakeEnabled;
-    els.wakeThreshold.value =
-      cfg.wakeThreshold != null ? cfg.wakeThreshold : 0.2;
     els.idleChatterEnabled.checked = cfg.idleChatterEnabled !== false;
     els.idleChatterMin.value =
       cfg.idleChatterMin != null ? cfg.idleChatterMin : 25;
-    updateWakeLabel();
     updateIdleChatterLabel();
     syncPresetActive();
     // 没填真 Key 就让欢迎横幅出来；填好了就藏起来不打扰
@@ -165,9 +151,6 @@ els.resetPersona.addEventListener('click', () => {
   els.persona.value = defaultPersona;
   els.persona.focus();
 });
-
-// ---- 语音唤醒开关：联动文字 ----
-els.wakeEnabled.addEventListener('change', updateWakeLabel);
 
 // ---- 显示/隐藏 Key 的小眼睛：两个 IconPark 线性图标，跟随 currentColor。
 // 含 ASCII 双引号，整串用 backtick 包，避免被当字符串结束符。

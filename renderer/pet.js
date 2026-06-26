@@ -111,24 +111,25 @@ const CLIPS = {
   wave: { fps: 9, frames: 4, faces: 'front' }, // 河马：挥手打招呼
   roll: { fps: 8, frames: 6, faces: 'front' }, // 河马：微笑转头卖萌
   cheer: { fps: 8, frames: 5, faces: 'front' }, // 河马：捂嘴欢呼（当作开心接食）
+  // 表情帧用相对「角色目录」的路径（loadAllFrames 会拼上 characters/<id>/）。
   tearful: {
     fps: 1,
-    frames: ['../assets/expressions/tearful.png'],
+    frames: ['expressions/tearful.png'],
     faces: 'front',
   },
   tearful2: {
     fps: 1,
-    frames: ['../assets/expressions/tearful-2.png'],
+    frames: ['expressions/tearful-2.png'],
     faces: 'front',
   },
   tearful3: {
     fps: 1,
-    frames: ['../assets/expressions/tearful-3.png'],
+    frames: ['expressions/tearful-3.png'],
     faces: 'front',
   },
   tearful4: {
     fps: 1,
-    frames: ['../assets/expressions/tearful-4.png'],
+    frames: ['expressions/tearful-4.png'],
     faces: 'front',
   },
 };
@@ -163,8 +164,14 @@ const BASELINE_WIN = PET_Y + BASELINE * (PET / SRC);
 
 // ---- Sprite preloading ------------------------------------------------------
 
-// images[clip] = Image[] (index 0..frames-1)
-const images = {};
+// images[clip] = Image[] (index 0..frames-1). `let`, not `const`: switching
+// characters loads the new set into a fresh object, then swaps it in atomically
+// (no half-loaded frames ever render). 所有访问都走 `images` 变量名，重赋值即生效。
+let images = {};
+// 当前已加载的角色 id（启动时由 start() 设定；切换时由 switchCharacter 更新）。
+let currentCharId = null;
+// 当前角色显示名，给主动互动气泡文案里的 {name} 用；'桌宠' 只是首帧兜底。
+let charName = '桌宠';
 
 function loadOne(src, tasks) {
   const img = new Image();
@@ -179,24 +186,49 @@ function loadOne(src, tasks) {
   return img;
 }
 
-function loadAllFrames() {
+// Load every clip's frames for `charId` into `into` (defaults to the live
+// `images`). Numbered clips → characters/<id>/<clip>/NN.png; array clips (the
+// 表情) → characters/<id>/<相对路径>. Resolves once all frames settled.
+function loadAllFrames(charId, into = images) {
   const tasks = [];
-  // Numbered animation clips.
+  const root = `../assets/characters/${charId}`;
   for (const clip of Object.keys(CLIPS)) {
-    images[clip] = [];
+    into[clip] = [];
     const frames = CLIPS[clip].frames;
     if (Array.isArray(frames)) {
       frames.forEach((src, i) => {
-        images[clip][i] = loadOne(src, tasks);
+        into[clip][i] = loadOne(`${root}/${src}`, tasks);
       });
     } else {
       for (let i = 1; i <= frames; i++) {
         const name = String(i).padStart(2, '0') + '.png';
-        images[clip][i - 1] = loadOne(`../assets/${clip}/${name}`, tasks);
+        into[clip][i - 1] = loadOne(`${root}/${clip}/${name}`, tasks);
       }
     }
   }
   return Promise.all(tasks);
+}
+
+// Hot-swap to another character: preload its full frame set into a fresh object
+// FIRST, then swap `images` in one shot so no half-loaded frame ever renders.
+// Resets to a clean REST so an in-flight walk/activity never strands the pet.
+async function switchCharacter(charId) {
+  if (!charId || charId === currentCharId) return;
+  const next = {};
+  await loadAllFrames(charId, next);
+  images = next;
+  currentCharId = charId;
+  clearTimeout(state.phaseTimer);
+  walkTarget = null;
+  returningHome = false;
+  state.frame = 0;
+  // Claude 任务在跑时身体姿态另有逻辑接管（working→踏步 / waiting→抱臂），
+  // 这里只在自由态回到 REST；持有态下次状态 tick 会自行纠正。
+  if (!state.paused && !state.dragging && !claudeHolding()) {
+    enterRest();
+  } else {
+    setClip(REST);
+  }
 }
 
 // ---- Local state ------------------------------------------------------------
@@ -571,24 +603,31 @@ function drawStatusChip(now, alpha, mode, project, status, suffix) {
 
   ctx.globalAlpha = alpha;
 
-  // 气泡主体（白色圆角卡片）—— 不加 canvas 阴影：blur 在透明窗上会发灰发脏
+  // 气泡主体 + 尾巴：一条连续路径，一次 fill + 一次 stroke 完成。这样尾巴是外轮廓
+  // 的一部分（有描边、和主体无缝），底边不会被主体描边横切一条线——白底上也能
+  // 看见尾巴。底边在尾巴左右根处断开插入三角，其余按圆角矩形走。
+  // 半像素偏移让 1px 描边落在像素网格上更清晰。
+  const L = bx + 0.5;
+  const T = by + 0.5;
+  const R = bx + chipW - 0.5;
+  const B = by + H - 0.5;
   ctx.beginPath();
-  ctx.roundRect(bx, by, chipW, H, r);
+  ctx.moveTo(L + r, T);
+  ctx.lineTo(R - r, T);
+  ctx.arcTo(R, T, R, T + r, r); // 右上圆角
+  ctx.lineTo(R, B - r);
+  ctx.arcTo(R, B, R - r, B, r); // 右下圆角
+  ctx.lineTo(cx + 5, B); // 底边右段 → 尾巴右根
+  ctx.lineTo(cx, by + H + CHIP_TAIL); // 尾巴尖
+  ctx.lineTo(cx - 5, B); // 尾巴左根 → 底边左段
+  ctx.lineTo(L + r, B);
+  ctx.arcTo(L, B, L, B - r, r); // 左下圆角
+  ctx.lineTo(L, T + r);
+  ctx.arcTo(L, T, L + r, T, r); // 左上圆角
+  ctx.closePath();
   ctx.fillStyle = 'rgba(255,255,255,0.98)';
   ctx.fill();
-
-  // 尾巴三角，与主体底部无缝衔接
-  ctx.beginPath();
-  ctx.moveTo(cx - 5, by + H - 1);
-  ctx.lineTo(cx + 5, by + H - 1);
-  ctx.lineTo(cx, by + H + CHIP_TAIL);
-  ctx.closePath();
-  ctx.fill();
-
-  // 极淡边框勾轮廓（替代阴影做层次）
-  ctx.beginPath();
-  ctx.roundRect(bx + 0.5, by + 0.5, chipW - 1, H - 1, r);
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
   ctx.lineWidth = 1;
   ctx.stroke();
 
@@ -1242,18 +1281,6 @@ window.pet.onDropPath((p) => {
   eatAndOpen(p);
 });
 
-// Wake word "河马河马" heard (section H): a single attentive wave, same one-off
-// shape as the tap yip. The chat panel pops separately; this is just the pet
-// perking up to say "I'm listening".
-window.pet.onWakeBark(() => {
-  if (state.paused || state.dragging) return;
-  clearTimeout(state.phaseTimer);
-  walkTarget = null;
-  returningHome = false;
-  state.activitiesLeft = 1;
-  setClip('wave', { loopTarget: 1 });
-});
-
 // Display sleep/wake reconcile (fixes the post-unlock position scramble): main
 // pushes the window's true, on-screen-clamped position; adopt it as the new
 // home and settle there so gaze, click-through and wandering all re-anchor.
@@ -1467,7 +1494,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
 const CHATTER = {
   sit: ['坐久啦，起来动动～', '记得喝口水哦', '伸个懒腰吧！', '抬头远眺一下眼睛'],
   care: ['今天也辛苦啦', '别太累，我陪着你', '深呼吸，放松一下～', '你已经很棒啦'],
-  cute: ['河马在偷看你～', '摸摸我嘛', '嘿，被我发现摸鱼', '哼哧哼哧…'],
+  cute: ['{name}在偷看你～', '摸摸我嘛', '嘿，被我发现摸鱼', '哼哧哼哧…'],
 };
 
 // 按时段问候：触发时按当前小时挑一池。
@@ -1484,7 +1511,8 @@ function timeGreeting() {
 function pickChatter() {
   const pools = [CHATTER.sit, CHATTER.care, CHATTER.cute, timeGreeting()];
   const pool = pools[Math.floor(Math.random() * pools.length)];
-  return pool[Math.floor(Math.random() * pool.length)];
+  const msg = pool[Math.floor(Math.random() * pool.length)];
+  return msg.replace(/\{name\}/g, charName);
 }
 
 // 很轻的柔和「叮」：Web Audio 合成一个正弦音 + 快速衰减，避免突兀。首个用户手势
@@ -1545,10 +1573,27 @@ window.pet.onIdleChatterConfig((c) => {
   scheduleChatter();
 });
 
+// 右键菜单切换角色：主进程下发新角色 {id, name} → 热重载素材 + 更新文案名。
+window.pet.onCharacterChange((ch) => {
+  if (!ch || !ch.id) return;
+  if (ch.name) charName = ch.name;
+  switchCharacter(ch.id);
+});
+
 // ---- Boot -------------------------------------------------------------------
 
 async function start() {
-  await loadAllFrames();
+  // 当前角色：问主进程（读 config.character.id），拿不到就回退 hema。
+  let charId = 'hema';
+  try {
+    const ch = await window.pet.getCharacter();
+    if (ch && ch.id) charId = ch.id;
+    if (ch && ch.name) charName = ch.name;
+  } catch (_) {
+    /* 主进程未就绪：用默认角色 */
+  }
+  currentCharId = charId;
+  await loadAllFrames(charId, images);
   loadBondState();
 
   // Seed local position from the real window position; that spot is home.

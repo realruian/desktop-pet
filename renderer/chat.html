@@ -7,62 +7,44 @@
       content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
     />
     <link rel="stylesheet" href="chat.css" />
-    <title>河马聊天</title>
+    <title>桌宠聊天</title>
   </head>
   <body>
     <div id="panel">
       <header id="titlebar">
-        <span id="title">和河马聊天</span>
+        <span id="title">和桌宠聊天</span>
         <div id="titleActions">
-          <!-- IconPark / Edit / delete-one：删除（垃圾桶）-->
+          <!-- Lucide / trash-2：清空对话 -->
           <button id="clear" title="清空对话" aria-label="清空对话">
-            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-              <path
-                d="M15 12L16.2 5H31.8L33 12"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linejoin="round"
-              />
-              <path
-                d="M6 12H42"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linecap="round"
-              />
-              <path
-                fill-rule="evenodd"
-                clip-rule="evenodd"
-                d="M37 12L35 43H13L11 12H37Z"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <path
-                d="M19 35H29"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linecap="round"
-              />
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
           </button>
-          <!-- IconPark / Character / close-small：关闭-小 -->
+          <!-- Lucide / x：收起 -->
           <button id="close" title="收起" aria-label="收起">
-            <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-              <path
-                d="M14 14L34 34"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <path
-                d="M14 34L34 14"
-                stroke="currentColor"
-                stroke-width="4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
             </svg>
           </button>
         </div>
@@ -72,95 +54,37 @@
         <textarea
           id="input"
           rows="1"
-          placeholder="跟河马说点什么…"
+          placeholder="跟桌宠说点什么…"
         ></textarea>
-        <!-- IconPark / Hardware / microphone：麦克风 -->
+        <!-- Lucide / mic：麦克风 -->
         <button id="mic" title="按一下说话，再按一下结束" aria-label="录音">
-          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-            <rect
-              x="16"
-              y="4"
-              width="16"
-              height="28"
-              rx="8"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M10 21V24C10 31.732 16.268 38 24 38C31.732 38 38 31.732 38 24V21"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M24 5V11"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M16 16H21"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M27 16H32"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M16 22H21"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M27 22H32"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M24 38V44"
-              stroke="currentColor"
-              stroke-width="4"
-            />
-            <path
-              d="M16 44H32"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 19v3" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <rect x="9" y="2" width="6" height="13" rx="3" />
           </svg>
         </button>
-        <!-- IconPark / Arrow / up：发送 -->
+        <!-- Lucide / arrow-up：发送 -->
         <button id="send" title="发送" aria-label="发送">
-          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-            <path
-              d="M24 42V10"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M11 23L24 10L37 23"
-              stroke="currentColor"
-              stroke-width="4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m5 12 7-7 7 7" />
+            <path d="M12 19V5" />
           </svg>
         </button>
       </footer>

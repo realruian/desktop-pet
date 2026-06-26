@@ -11,8 +11,5 @@
   "devDependencies": {
     "@electron/packager": "^20.0.1",
     "electron": "^33.0.0"
-  },
-  "dependencies": {
-    "sherpa-onnx-node": "^1.13.2"
   }
 }

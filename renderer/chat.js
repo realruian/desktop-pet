@@ -42,16 +42,18 @@ function addTyping() {
   return div;
 }
 
-// 本地欢迎气泡（不走 API），首次打开时让面板有人气
-const GREETING = '我是河马，打字或者按下面的话筒跟我说话都行～';
-addBubble('pet', GREETING);
+// 欢迎气泡 + 输入框文案都随当前角色名变化。petName 由 getCharacter() 填真名，
+// '桌宠' 只是 IPC 返回前的首帧兜底。初始欢迎气泡在文件末尾的启动块里发出。
+let petName = '桌宠';
+const greetingText = () =>
+  `我是${petName}，打字或者按下面的话筒跟我说话都行～`;
 
 // 清空对话：清掉历史和气泡，重新放一句欢迎，回到刚开聊的状态。
 // 不弹确认——会话内是临时聊天、关掉聊天窗也不持久化，不是高风险操作。
 function clearConversation() {
   history.length = 0;
   messagesEl.innerHTML = '';
-  addBubble('pet', GREETING);
+  addBubble('pet', greetingText());
   inputEl.focus();
 }
 clearEl.addEventListener('click', clearConversation);
@@ -112,8 +114,8 @@ function autosize() {
 // a normal text bubble.
 
 const REC_MAX_MS = 60 * 1000; // safety cap per recording
-const PLACEHOLDER_IDLE = '跟河马说点什么…';
-const PLACEHOLDER_PTT = '河马在听…松开按键自动发送';
+const placeholderIdle = () => `跟${petName}说点什么…`;
+const placeholderPtt = () => `${petName}在听…松开按键自动发送`;
 let rec = null; // active MediaRecorder (null = not recording)
 let recChunks = [];
 let recStream = null;
@@ -143,28 +145,21 @@ async function toggleRecording() {
   rec.onstop = onRecordingStop;
   rec.start();
   micEl.classList.add('recording');
-  if (pttActive) inputEl.placeholder = PLACEHOLDER_PTT;
+  if (pttActive) inputEl.placeholder = placeholderPtt();
   recTimer = setTimeout(() => rec && rec.stop(), REC_MAX_MS);
 }
 
 async function onRecordingStop() {
   clearTimeout(recTimer);
   pttActive = false;
-  // Wake-listen teardown: stop the VAD monitor and let main resume listening
-  // for the next "河马河马". A silent no-speech timeout finishes quietly (no
-  // error bubble) — the user said the wake word but then nothing.
-  const wasWake = wakeActive;
-  wakeActive = false;
-  stopVAD();
-  if (wasWake) window.chat.wakeDone();
   micEl.classList.remove('recording');
-  inputEl.placeholder = PLACEHOLDER_IDLE;
+  inputEl.placeholder = placeholderIdle();
   if (recStream) recStream.getTracks().forEach((t) => t.stop());
   recStream = null;
   const blob = new Blob(recChunks, { type: 'audio/webm' });
   rec = null;
   if (blob.size < 1500) {
-    if (!wasWake) addBubble('error', '没录到声音，再试一次？');
+    addBubble('error', '没录到声音，再试一次？');
     return;
   }
   const typing = addTyping(); // "听写中" dots
@@ -255,113 +250,6 @@ window.addEventListener('keyup', () => {
   if (pttActive && rec) rec.stop();
 });
 
-// ---- Wake word "河马河马" → voice-activity auto-send (section H) -------------
-//
-// After main detects the wake phrase it pops the panel and fires this. There's
-// no key to release, so we record with a simple energy-based VAD: once the
-// user starts talking, ~1.2s of trailing silence ends and auto-sends the
-// question; if nothing is said within a few seconds we bail quietly.
-const WAKE_SILENCE_MS = 1200; // trailing silence that ends the utterance
-const WAKE_NOSPEECH_MS = 4000; // give up if the user says nothing
-const WAKE_MAX_MS = 12000; // hard cap on a single question
-const WAKE_RMS_GATE = 0.018; // speech-vs-silence energy threshold
-const PLACEHOLDER_WAKE = '河马在听…说完自动发送';
-let wakeActive = false;
-let vad = null; // { timer, ctx } while a VAD monitor runs
-
-// A random little greeting the pet pops the moment it's woken — pure flavor,
-// shown as a display-only bubble (NOT pushed to history, so it never muddles
-// the actual question→answer the model sees).
-const WAKE_GREETINGS = [
-  '主人，你终于想起我了！',
-  '我在我在，说吧～',
-  '主人找我啦？',
-  '哎，等你好久啦～说说看？',
-  '这就来，听着呢～',
-  '雷达一直给你开着呢，请讲！',
-  '是不是想我了？嘿嘿，说吧～',
-  '主人召唤，河马到！',
-];
-
-window.chat.onWakeListen(() => {
-  if (rec) return; // already recording (manual / PTT) — ignore the trigger
-  wakeActive = true;
-  // Bark fires first (pet window); let it lead, then pop the greeting bubble.
-  const greeting = WAKE_GREETINGS[Math.floor(Math.random() * WAKE_GREETINGS.length)];
-  setTimeout(() => addBubble('pet', greeting), 400);
-  startWakeRecording();
-});
-
-async function startWakeRecording() {
-  try {
-    await window.chat.ensureMic();
-    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (_) {
-    wakeActive = false;
-    window.chat.wakeDone();
-    addBubble(
-      'error',
-      '用不了麦克风：去 系统设置 → 隐私与安全性 → 麦克风，允许本应用后再试。'
-    );
-    return;
-  }
-  recChunks = [];
-  rec = new MediaRecorder(recStream, { mimeType: 'audio/webm' });
-  rec.ondataavailable = (e) => recChunks.push(e.data);
-  rec.onstop = onRecordingStop;
-  rec.start();
-  micEl.classList.add('recording');
-  inputEl.placeholder = PLACEHOLDER_WAKE;
-  recTimer = setTimeout(() => rec && rec.stop(), WAKE_MAX_MS);
-  startVAD(recStream);
-}
-
-function startVAD(stream) {
-  let ctx;
-  try {
-    ctx = new AudioContext();
-  } catch (_) {
-    return; // no VAD; the WAKE_MAX_MS cap still ends the recording
-  }
-  const src = ctx.createMediaStreamSource(stream);
-  const an = ctx.createAnalyser();
-  an.fftSize = 512;
-  src.connect(an);
-  const buf = new Float32Array(an.fftSize);
-  const t0 = performance.now();
-  let speechStarted = false;
-  let lastLoud = t0;
-  const timer = setInterval(() => {
-    if (!rec || !wakeActive) return;
-    an.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    const rms = Math.sqrt(sum / buf.length);
-    const now = performance.now();
-    if (rms > WAKE_RMS_GATE) {
-      lastLoud = now;
-      if (!speechStarted && now - t0 > 150) speechStarted = true;
-    }
-    if (speechStarted && now - lastLoud > WAKE_SILENCE_MS) {
-      rec.stop(); // → onRecordingStop → transcribe + send
-    } else if (!speechStarted && now - t0 > WAKE_NOSPEECH_MS) {
-      rec.stop(); // silent timeout: onRecordingStop finishes quietly
-    }
-  }, 80);
-  vad = { timer, ctx };
-}
-
-function stopVAD() {
-  if (!vad) return;
-  clearInterval(vad.timer);
-  try {
-    vad.ctx.close();
-  } catch (_) {
-    /* already closed */
-  }
-  vad = null;
-}
-
 sendEl.addEventListener('click', () => sendMessage());
 inputEl.addEventListener('input', autosize);
 inputEl.addEventListener('keydown', (e) => {
@@ -379,6 +267,60 @@ closeEl.addEventListener('click', () => window.chat.hide());
 
 // 聊天窗是「创建一次、反复隐藏/显示」，每次 openChat 主进程都会 chatWin.focus()，
 // 触发这里的 window focus 事件 → 把焦点落到输入框，双击打开即可直接打字，无需再点一下。
-window.addEventListener('focus', () => inputEl.focus());
+// 每次聊天窗获得焦点（= 每次打开）：聚焦输入框，并校准角色名——切换角色后若
+// 名字变了就刷新标题/占位，对话还空着时连欢迎气泡一起换成新角色名（双保险，
+// 兜住 character-name 推送可能错过的时序）。
+window.addEventListener('focus', () => {
+  inputEl.focus();
+  window.chat
+    .getCharacter()
+    .then((ch) => {
+      if (ch && ch.name && ch.name !== petName) {
+        petName = ch.name;
+        applyPetName();
+        refreshGreetingIfEmpty();
+      }
+    })
+    .catch(() => {});
+});
 
 inputEl.focus();
+
+// ---- 角色名注入：标题/占位/欢迎都随当前角色名 ------------------------------
+function applyPetName() {
+  const t = document.getElementById('title');
+  if (t) t.textContent = `和${petName}聊天`;
+  document.title = `${petName}聊天`;
+  // 只在空闲时刷新占位（录音中保留「…在听」提示）。
+  if (!pttActive && !rec) inputEl.placeholder = placeholderIdle();
+}
+
+// 对话还空着（只有欢迎气泡、没真实问答）时，把欢迎气泡也换成当前角色名。
+function refreshGreetingIfEmpty() {
+  if (history.length > 0) return;
+  messagesEl.innerHTML = '';
+  addBubble('pet', greetingText());
+}
+
+// 拉一次当前角色名，铺好文案，再发首条欢迎气泡（用真名）。
+window.chat
+  .getCharacter()
+  .then((ch) => {
+    if (ch && ch.name) petName = ch.name;
+  })
+  .catch(() => {
+    /* 拿不到就用兜底名 */
+  })
+  .finally(() => {
+    applyPetName();
+    addBubble('pet', greetingText());
+  });
+
+// 右键菜单切换角色后，主进程推来新名字 → 刷新标题/占位；对话还空着时连欢迎
+// 气泡一起换成新角色名（聊过了就只动标题，不改历史对话）。
+window.chat.onCharacterName((name) => {
+  if (!name) return;
+  petName = name;
+  applyPetName();
+  refreshGreetingIfEmpty();
+});

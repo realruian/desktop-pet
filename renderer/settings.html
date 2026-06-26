@@ -7,12 +7,12 @@
       content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
     />
     <link rel="stylesheet" href="settings.css" />
-    <title>河马设置</title>
+    <title>桌宠设置</title>
   </head>
   <body>
     <div id="panel">
       <header id="titlebar">
-        <span id="title">河马设置</span>
+        <span id="title">桌宠设置</span>
         <!-- IconPark / Character / close-small：关闭 -->
         <button id="close" title="关闭" aria-label="关闭">
           <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -152,7 +152,7 @@
             id="persona"
             rows="4"
             spellcheck="false"
-            placeholder="留空＝用默认河马人设。想自定义就写它的性格、说话风格、能力边界…"
+            placeholder="留空＝用内置通用助手人设（文本里的 {name} 会自动替换成当前角色名）。想自定义就写它的定位、语气、能力边界…"
           ></textarea>
           <span class="hint">改完下次发消息即时生效，无需重启</span>
         </div>
@@ -186,31 +186,9 @@
           <span class="hint">填了就本地检索笔记作参考；留空跳过</span>
         </label>
 
-        <!-- 语音唤醒：开关 + 灵敏度 -->
+        <!-- 主动互动：时不时冒个气泡关心你 -->
         <div class="field">
-          <span class="label">语音唤醒（喊「河马河马」）</span>
-          <div class="row wakerow">
-            <label class="switch">
-              <input id="wakeEnabled" type="checkbox" />
-              <span class="track"></span>
-            </label>
-            <span class="switchlabel" id="wakeLabel">关闭</span>
-            <span class="spacer"></span>
-            <span class="sublabel">灵敏度</span>
-            <input
-              id="wakeThreshold"
-              type="number"
-              step="0.05"
-              min="0.1"
-              max="0.5"
-            />
-          </div>
-          <span class="hint">越低越灵敏（默认 0.2；误触发多调高、听不到调低）</span>
-        </div>
-
-        <!-- 主动互动：河马时不时冒个气泡关心你 -->
-        <div class="field">
-          <span class="label">主动互动（河马时不时冒泡关心你）</span>
+          <span class="label">主动互动（时不时冒泡关心你）</span>
           <div class="row wakerow">
             <label class="switch">
               <input id="idleChatterEnabled" type="checkbox" />

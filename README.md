@@ -37,7 +37,6 @@
 **聊天 & 语音**
 - 双击河马身弹出浅色聊天卡片，打开即可直接打字（任意 OpenAI 兼容模型驱动）
 - 麦克风语音输入，或在任意应用里长按 `⌥Space` 说话、松手自动转写发送
-- 喊一声「河马河马」免按键唤醒 —— 唤醒词识别全程本地离线，不联网、不耗 API
 - 可选接入 Obsidian 笔记库，提问时本地检索相关笔记作为参考
 
 **主动互动**
@@ -47,7 +46,7 @@
 - 把 Finder 的文件/文件夹拖到它身上，河马张嘴吃进去，同时打开 Terminal、`cd` 过去并运行 `claude`
 
 **图形设置面板**
-- 右键 → 设置：填 Key、下拉选主流模型、写自定义人设、设 Obsidian 库、开关语音唤醒与主动互动、一键测试连接，改完即时生效
+- 右键 → 设置：填 Key、下拉选主流模型、写自定义人设、设 Obsidian 库、开关主动互动、一键测试连接，改完即时生效
 
 > 不填任何配置也能玩：休息、走动、拖动、Claude 状态、主动互动都开箱即用；只有聊天 / 语音 / 笔记问答需要你自己的 API Key。
 
@@ -88,7 +87,7 @@ npm start
 | --- | --- |
 | 聊天 / 语音 | 填入 API Key（[OpenRouter](https://openrouter.ai) 或 [Moonshot](https://platform.moonshot.cn)），再从下拉里选模型 |
 | 笔记问答 | 填上你的 Obsidian 库路径，启用本地检索 |
-| 语音唤醒 / 主动互动 | 面板里有独立开关与频率/灵敏度调节，默认都开启 |
+| 语音输入 / 主动互动 | 语音输入填好 Key 即用（麦克风按钮或全局 `⌥Space`）；主动互动在面板里开关与调频率，默认开启 |
 
 > 首次用「拖文件起终端」时，macOS 会请求**自动化**（控制 Terminal）与**辅助功能**（把 `@文件名` 预填进输入框）权限，各允许一次即可。Claude Code 状态监听依赖已注册到 `~/.claude/settings.json` 的 hooks，**已经开着的 Claude 会话需重启才会被监听**。
 
@@ -107,9 +106,9 @@ npm start
 </details>
 
 <details>
-<summary>语音唤醒 & 语音输入</summary>
+<summary>语音输入（按住说话）</summary>
 
-唤醒：一个隐藏窗口用 Web Audio 采麦克风、降到 16kHz 串流给主进程，主进程用 **sherpa-onnx**（WenetSpeech 中文 KWS 模型，约 5.5MB，在 `assets/kws/`）做离线关键词检测，纯本地无网络。命中后进入语音活动检测（VAD）录音，说完停顿约 1.2 秒自动转写发送。输入：`MediaRecorder` 录音 → 重采样为 16kHz WAV → 交主进程用音频模型逐字转写 → 文本走正常聊天链路。缺原生模块时自动降级为「无唤醒」。
+按下聊天面板的麦克风按钮，或在任意应用里长按全局快捷键 `⌥Space`（可在设置里改），桌宠用 `MediaRecorder` 采麦克风录音 → 重采样为 16kHz 单声道 WAV → 交主进程调用音频模型逐字转写 → 文本走正常聊天链路、松手自动发送。API Key 永不进渲染层。
 </details>
 
 <details>
@@ -121,15 +120,14 @@ npm start
 ## 项目结构
 
 ```
-main.js              主进程：窗口 / IPC / 菜单 / Claude hook 监听 / 拖文件起终端 / 聊天 / 语音唤醒 / 设置
-kws.js               语音唤醒引擎（封装 sherpa-onnx）
-preload*.js          各窗口的安全 IPC 桥（pet / chat / settings / catcher / listener）
+main.js              主进程：窗口 / IPC / 菜单 / Claude hook 监听 / 拖文件起终端 / 聊天 / 语音输入转写 / 设置
+preload*.js          各窗口的安全 IPC 桥（pet / chat / settings / catcher）
 renderer/
   pet.js             动画引擎 + 行为状态机 + 拖动/穿透 + Claude 状态气泡 + 主动互动 + 拖放
-  chat.*             聊天面板（浅色气泡 + 输入框 + 语音/VAD）
+  chat.*             聊天面板（浅色气泡 + 输入框 + 麦克风语音输入）
   settings.*         图形设置面板
-  catcher.* / listener.*   隐形拖放接驳窗 / 语音监听窗
-assets/              动画帧 + 离线唤醒模型
+  catcher.*          隐形拖放接驳窗
+assets/              各角色精灵动画帧
 build/               打包资源与脚本（pack.js / icon.icns / 权限声明）
 config.example.json  配置模板
 ```
@@ -140,7 +138,7 @@ config.example.json  配置模板
 
 - **Electron** —— 透明、无边框、永远置顶、像素级点击穿透的桌面浮层
 - **Canvas 2D** —— 逐帧像素动画与状态气泡手绘
-- **sherpa-onnx** —— 离线中文关键词检测；**Web Audio** —— 录音与重采样
+- **Web Audio / `MediaRecorder`** —— 麦克风录音与 16kHz 重采样（语音输入）
 - **Node `http`** —— Claude Code hook 监听；**AppleScript / osascript** —— 驱动 Terminal
 - 安全模型：`contextIsolation` 开、`nodeIntegration` 关，渲染层经 `preload` 白名单 IPC 通信
 

@@ -27,11 +27,6 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-// The hidden wake-word listener processes mic audio via Web Audio with no user
-// gesture; without this, Chromium's autoplay policy can leave its AudioContext
-// suspended so no frames flow. Capture (getUserMedia) is unaffected, but the
-// processing graph needs this to run gesture-free.
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // Window is a WIN×WIN square; the canvas inside is drawn at this size.
 const WIN = 160;
@@ -55,26 +50,97 @@ const CLAUDE_PORT = 4319;
 const CHAT_W = 300;
 const CHAT_H = 400;
 
-// The pet's persona for Kimi conversations (section F). Prepended as the
-// system message on every request.
-const PERSONA =
-  '你是住在 macOS 桌面右下角的像素河马桌宠，名字叫「河马」（英文 Hema）——主人给你起的，' +
-  '你也这样自称。性格活泼、粘人、有点小机灵。' +
-  '用中文口语回复，简短（一般不超过三句），偶尔带可爱的语气词。' +
-  '你会的本领：听主人说话（语音）、被主人拖来拖去、' +
-  '显示 Claude Code 任务进度、接住拖给你的文件帮主人打开终端、' +
-  '翻主人的 Obsidian 笔记帮忙回忆和回答。' +
-  '铁规矩：只有当消息里真的附了「主人的笔记片段」时，才能提到笔记内容，' +
-  '并自然说出自哪篇；片段里没有的就老实说没翻到。消息里没附笔记片段时，' +
-  '绝不能提任何笔记名、待办或文件，也不能说自己刚翻过笔记——那是编造。' +
-  '不要用 Markdown 标题或长列表，自然聊天即可。';
+// The pet's persona for Kimi conversations (section F). Prepended as the system
+// message on every request. {name} 在运行时被 applyCharacterName() 替换成当前
+// 角色名，所以换角色时它的自称跟着变，但人格统一是「通用助手」。用户在设置面板
+// 填的自定义人设会整体覆盖它（自定义文本同样支持 {name} 占位）。
+const PERSONA = [
+  '你是常驻在用户 macOS 桌面的像素桌宠助手，名字叫「{name}」。你既是陪用户的桌宠，也是一个可靠的日常工作与生活助手。',
+  '职责：帮用户解决问题、快速回答、整理信息、搭把手处理手头的工作与琐事。你的价值在于「有用」，不在于卖萌。',
+  '性格与语气：沉稳、靠谱、友好，但不浮夸、不撒娇、不堆语气词。像个简洁干练的助理——先给结论或答案，再按需补充。用中文口语，默认简短（一般 1~3 句），用户要展开再展开。',
+  '你能做的（别夸大）：听用户按住快捷键说话并转写；被拖来拖去；显示 Claude Code 任务进度；接住用户拖给你的文件帮忙在终端打开；检索用户的 Obsidian 笔记来帮助回忆和回答。',
+  '铁规矩：只有当消息里确实附了「用户的笔记片段」时，才能引用并说明出自哪篇；没附片段时绝不提任何笔记名、待办或文件，也不能声称翻过笔记——那是编造。不知道、做不到的直说不编；超出能力范围的请求，老实说明并给可行替代。',
+  '输出格式：不用 Markdown 标题或长列表，自然对话即可；代码或命令可以用代码块。',
+].join('');
 
 // Transcription instruction for the STT model (an audio-input chat model on
-// the same OpenAI-compatible endpoint — no extra account needed).
+// the same OpenAI-compatible endpoint — no extra account needed). {name} 同样
+// 在使用处被替换成当前角色名，作为转写热词。
 const STT_PROMPT =
   '请把这段语音逐字转写成简体中文文字。只输出转写结果本身，' +
   '不要任何解释、引号或前后缀；语音里夹杂的英文按原样保留。' +
-  '热词提示：说话人养的桌面宠物叫「河马」，听到相近发音时优先写作「河马」。';
+  '热词提示：说话人养的桌面宠物叫「{name}」，听到相近发音时优先写作「{name}」。';
+
+// ---- 角色（桌宠皮肤）---------------------------------------------------------
+// 每个角色的动作帧都在 assets/characters/<id>/{walk,scratch,...}，外加一份
+// meta.json（{id, name}）。当前角色 id 存在 config.character.id（默认 hema），
+// 右键菜单可即时切换；角色名通过 {name} 占位注入人设/文案。
+const CHARACTERS_DIR = path.join(__dirname, 'assets', 'characters');
+
+// 扫 assets/characters/ 得到 [{id, name}]（name 取 meta.json，读不到用 id 兜底）。
+function loadCharacters() {
+  const out = [];
+  try {
+    for (const id of fs.readdirSync(CHARACTERS_DIR)) {
+      const dir = path.join(CHARACTERS_DIR, id);
+      try {
+        if (!fs.statSync(dir).isDirectory()) continue;
+      } catch (_) {
+        continue;
+      }
+      let name = id;
+      try {
+        const meta = JSON.parse(
+          fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')
+        );
+        name = meta.name || id;
+      } catch (_) {
+        /* 没 meta 就用目录名兜底 */
+      }
+      out.push({ id, name });
+    }
+  } catch (_) {
+    /* characters 目录缺失：返回空，调用方自行兜底 */
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  return out;
+}
+
+// 当前角色 id：config.character.id，默认 hema；目录已不存在则回退第一个可用角色。
+function currentCharacterId() {
+  let id = 'hema';
+  for (const p of CONFIG_PATHS) {
+    try {
+      const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (c && c.character && c.character.id) {
+        id = c.character.id;
+        break;
+      }
+    } catch (_) {
+      /* 下一个路径 */
+    }
+  }
+  if (!fs.existsSync(path.join(CHARACTERS_DIR, id))) {
+    const all = loadCharacters();
+    id = all.length ? all[0].id : 'hema';
+  }
+  return id;
+}
+
+// 当前角色显示名（给人设 {name}、窗口文案、菜单勾选用）。
+function currentCharacterName() {
+  const id = currentCharacterId();
+  const hit = loadCharacters().find((c) => c.id === id);
+  return hit ? hit.name : id;
+}
+
+// 把任意文本里的 {name} 占位替换成当前角色名。
+function applyCharacterName(text) {
+  return String(text == null ? '' : text).replace(
+    /\{name\}/g,
+    currentCharacterName()
+  );
+}
 
 /** @type {BrowserWindow|null} */
 let win = null;
@@ -232,12 +298,33 @@ ipcMain.handle('get-idle-chatter-config', () => {
   return { enabled: c.idleChatterEnabled, minMinutes: c.idleChatterMin };
 });
 
+// 当前角色 -> { id, name }（桌宠启动时据此加载素材）。
+ipcMain.handle('get-character', () => ({
+  id: currentCharacterId(),
+  name: currentCharacterName(),
+}));
+
+// 切换当前角色：写回 config.character，热推给桌宠重载素材，并把新角色名推给
+// 已开的聊天/设置窗刷新文案。右键菜单每次重建，勾选状态自动跟随。
+function setCharacter(id) {
+  if (!id || id === currentCharacterId()) return;
+  patchConfig('character', { id });
+  const name = currentCharacterName();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('character-change', { id, name });
+  }
+  if (chatWin && !chatWin.isDestroyed()) {
+    chatWin.webContents.send('character-name', name);
+  }
+}
+
 // Right-click context menu, built and popped up by the main process.
 ipcMain.on('show-menu', () => {
   if (!win) return;
+  const curCharId = currentCharacterId();
   const menu = Menu.buildFromTemplate([
     {
-      label: '和河马聊天',
+      label: `和${currentCharacterName()}聊天`,
       click: () => openChat(),
     },
     {
@@ -252,10 +339,13 @@ ipcMain.on('show-menu', () => {
       click: () => win && win.webContents.send('menu-command', 'demo'),
     },
     {
-      label: '语音唤醒（喊「河马河马」）',
-      type: 'checkbox',
-      checked: wakeOn,
-      click: (item) => setWakeEnabled(item.checked, true),
+      label: '切换角色',
+      submenu: loadCharacters().map((c) => ({
+        label: c.name,
+        type: 'radio',
+        checked: c.id === curCharId,
+        click: () => setCharacter(c.id),
+      })),
     },
     {
       label: '设置',
@@ -376,7 +466,6 @@ function loadKimiConfig() {
   let obsidian = {};
   let stt = {};
   let hotkey = {};
-  let wake = {};
   let idle = {};
   for (const p of CONFIG_PATHS) {
     try {
@@ -386,22 +475,17 @@ function loadKimiConfig() {
       obsidian = parsed.obsidian || {};
       stt = parsed.stt || {};
       hotkey = parsed.hotkey || {};
-      wake = parsed.wake || {};
       idle = parsed.idle || {};
       break; // first existing config wins (userData, then repo checkout)
     } catch (_) {
       /* try the next location; none → env/defaults */
     }
   }
-  // wake.enabled defaults to true (the user asked for always-on wake); env
-  // PET_WAKE=0/1 overrides for tests.
-  let wakeEnabled = wake.enabled !== false;
-  if (process.env.PET_WAKE === '0') wakeEnabled = false;
-  if (process.env.PET_WAKE === '1') wakeEnabled = true;
   return {
     apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
-    // 人设：用户在设置面板填了就用，留空回退到内置默认 PERSONA。
-    persona: process.env.PET_PERSONA || cfg.persona || PERSONA,
+    // 人设：用户在设置面板填了就用，留空回退到内置默认 PERSONA；
+    // 两种情况都把 {name} 占位替换成当前角色名。
+    persona: applyCharacterName(process.env.PET_PERSONA || cfg.persona || PERSONA),
     baseURL:
       process.env.PET_KIMI_BASE ||
       cfg.baseURL ||
@@ -411,10 +495,6 @@ function loadKimiConfig() {
     sttModel:
       process.env.PET_STT_MODEL || stt.model || 'google/gemini-2.5-flash',
     pttHotkey: process.env.PET_PTT_HOTKEY || hotkey.ptt || 'Alt+Space',
-    wakeEnabled,
-    wakeThreshold:
-      Number(process.env.PET_WAKE_THRESHOLD) || wake.threshold || 0.2,
-    wakeScore: Number(process.env.PET_WAKE_SCORE) || wake.score || 2.0,
     // 主动互动：默认开，下限默认 25 分钟（实际触发在 [min, min+20] 随机）
     idleChatterEnabled: idle.enabled !== false,
     idleChatterMin: Number(idle.minMinutes) || 25,
@@ -422,8 +502,8 @@ function loadKimiConfig() {
 }
 
 // Persist a partial config change back to the user config file (creating it in
-// userData if needed), preserving everything else. Used by the menu's wake
-// toggle so the choice survives restarts.
+// userData if needed), preserving everything else. Used by the character-switch
+// menu so the choice survives restarts.
 function patchConfig(section, patch) {
   const target = CONFIG_PATHS[0]; // userData/config.json — the writable home
   let parsed = {};
@@ -559,14 +639,12 @@ ipcMain.handle('settings:load', () => {
     vault: c.vault,
     persona: rawPersona,
     defaultPersona: PERSONA,
-    wakeEnabled: c.wakeEnabled,
-    wakeThreshold: c.wakeThreshold,
     idleChatterEnabled: c.idleChatterEnabled,
     idleChatterMin: c.idleChatterMin,
   };
 });
 
-// 写回配置：合并而非覆盖，保留 stt/hotkey/wake 等其它字段不动。
+// 写回配置：合并而非覆盖，保留 stt/hotkey 等其它字段不动。
 ipcMain.handle('settings:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') {
     return { ok: false, error: '空表单' };
@@ -592,13 +670,6 @@ ipcMain.handle('settings:save', (_e, patch) => {
   parsed.obsidian = Object.assign({}, parsed.obsidian, {
     vault: patch.vault || '',
   });
-  // 语音唤醒：开关 + 灵敏度也从面板存（之前只能改 JSON / 右键菜单）
-  if (typeof patch.wakeEnabled === 'boolean') {
-    parsed.wake = Object.assign({}, parsed.wake, {
-      enabled: patch.wakeEnabled,
-      threshold: Number(patch.wakeThreshold) || parsed.wake?.threshold || 0.2,
-    });
-  }
   // 主动互动：开关 + 频率下限
   if (typeof patch.idleChatterEnabled === 'boolean') {
     parsed.idle = Object.assign({}, parsed.idle, {
@@ -610,10 +681,6 @@ ipcMain.handle('settings:save', (_e, patch) => {
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
-    // 唤醒开关即时生效（重启 KWS 引擎）；config 已在上面写过，不再重复持久化
-    if (typeof patch.wakeEnabled === 'boolean') {
-      setWakeEnabled(patch.wakeEnabled, false);
-    }
     // 主动互动配置即时推给桌宠（重排定时器）
     if (win && !win.isDestroyed()) {
       win.webContents.send('idle-chatter-config', {
@@ -721,17 +788,6 @@ ipcMain.on('settings:open-file', () => openConfigFile());
 ipcMain.on('settings:hide', () => {
   if (settingsWin) settingsWin.hide();
 });
-
-// Resolve a bundled resource directory to a REAL filesystem path. Inside a
-// packaged app, files referenced by the native KWS reader can't live in the
-// asar archive, so they're unpacked — map app.asar → app.asar.unpacked.
-function resourcePath(...parts) {
-  let base = __dirname;
-  if (base.includes('app.asar' + path.sep) || base.endsWith('app.asar')) {
-    base = base.replace('app.asar', 'app.asar.unpacked');
-  }
-  return path.join(base, ...parts);
-}
 
 // ---- Obsidian retrieval (section F) -----------------------------------------
 //
@@ -875,7 +931,7 @@ function createChatWindow() {
     frame: false,
     roundedCorners: false, // 关掉 macOS 原生圆角，避免与 CSS border-radius 叠出两层
     resizable: false,
-    hasShadow: false, // 原生阴影按方形窗框绘制，会在 CSS 圆角外露出半透明直角——交给 CSS
+    hasShadow: false, // 原生阴影按方形窗框绘制，会在 CSS 圆角外露半透明直角——交给 CSS
     skipTaskbar: true,
     fullscreenable: false,
     useContentSize: true,
@@ -910,7 +966,7 @@ function createChatWindow() {
 // Show the chat panel anchored to the pet: right-aligned with the pet, sitting
 // just above it, clamped into the work area.
 function openChat() {
-  // 没真 API Key 直接改弹设置——朋友双击 / 按 ⌥Space / 喊「河马河马」时
+  // 没真 API Key 直接改弹设置——朋友双击 / 按 ⌥Space 时
   // 就不用先看到一个聊天窗、再被错误信息推去设置。一步直达。
   if (!looksLikeRealKey(loadKimiConfig().apiKey)) {
     openSettings();
@@ -1077,7 +1133,7 @@ ipcMain.handle('chat-transcribe', async (_e, b64wav) => {
           {
             role: 'user',
             content: [
-              { type: 'text', text: STT_PROMPT },
+              { type: 'text', text: applyCharacterName(STT_PROMPT) },
               {
                 type: 'input_audio',
                 input_audio: { data: b64wav, format: 'wav' },
@@ -1291,7 +1347,7 @@ function notifyDragDep() {
   if (Notification.isSupported()) {
     new Notification({
       title: '「拖文件起终端」未启用',
-      body: '需要带 pyobjc 的 python3。装好（如 pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa）后重启河马即可开启。',
+      body: '需要带 pyobjc 的 python3。装好（如 pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa）后重启桌宠即可开启。',
     }).show();
   }
 }
@@ -1393,123 +1449,6 @@ ipcMain.on('catcher-drop', (_e, p) => {
   if (dropCatcher) dropCatcher.hide();
 });
 
-// ---- Wake word "河马河马" (section H) ----------------------------------------
-//
-// A hidden listener window captures the mic and streams 16 kHz mono PCM here;
-// the sherpa-onnx engine (kws.js) spots the wake phrase fully on-device. On a
-// hit we bark, pop the chat panel, and have it record the follow-up question
-// with voice-activity auto-send. Capture pauses for that question so the engine
-// never hears (and re-triggers on) the user's own speech.
-const { WakeEngine } = require('./kws');
-let listenerWin = null;
-let wakeEngine = null;
-let wakeOn = false; // current enabled state (menu/config)
-let wakeConversation = false; // a wake-triggered Q&A is in progress
-
-function createListenerWindow() {
-  listenerWin = new BrowserWindow({
-    width: 1,
-    height: 1,
-    show: false,
-    frame: false,
-    transparent: true,
-    skipTaskbar: true,
-    fullscreenable: false,
-    focusable: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-listener.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false,
-    },
-  });
-  listenerWin.loadFile(path.join(__dirname, 'renderer', 'listener.html'));
-  // Start capture once the page is live (if wake is enabled). Sending before
-  // load would be dropped; startWakeEngine also sends for the runtime toggle.
-  listenerWin.webContents.on('did-finish-load', () => {
-    if (wakeOn && listenerWin) listenerWin.webContents.send('wake-start');
-  });
-  listenerWin.on('closed', () => {
-    listenerWin = null;
-  });
-}
-
-// Listener → main: one 16 kHz mono float32 frame. Ignored while a wake
-// conversation is in flight (capture is paused renderer-side too).
-ipcMain.on('wake-audio', (_e, frame) => {
-  if (!wakeEngine || wakeConversation) return;
-  let samples = frame;
-  if (!(frame instanceof Float32Array)) {
-    try {
-      samples = new Float32Array(
-        frame.buffer || frame,
-        frame.byteOffset || 0,
-        frame.byteLength ? frame.byteLength / 4 : undefined
-      );
-    } catch (_) {
-      return;
-    }
-  }
-  wakeEngine.feed(samples);
-});
-
-ipcMain.on('wake-ready', (_e, info) => {
-  console.log(
-    '[kws] mic capture ' +
-      (info && info.ok ? 'started' : 'FAILED: ' + (info && info.reason))
-  );
-});
-
-// Chat renderer signals the wake-triggered question is finished recording →
-// resume listening for the next "河马河马".
-ipcMain.on('wake-done', () => {
-  wakeConversation = false;
-  if (wakeOn && listenerWin) listenerWin.webContents.send('wake-pause', false);
-});
-
-function onWakeDetected() {
-  if (wakeConversation) return;
-  wakeConversation = true;
-  if (listenerWin) listenerWin.webContents.send('wake-pause', true);
-  if (win) win.webContents.send('wake-bark');
-  openChat();
-  if (chatWin) chatWin.webContents.send('wake-listen');
-}
-
-function startWakeEngine() {
-  const { wakeThreshold, wakeScore } = loadKimiConfig();
-  wakeEngine = new WakeEngine({
-    modelDir: resourcePath('assets', 'kws'),
-    keywordsFile: resourcePath('assets', 'kws', 'keywords.txt'),
-    threshold: wakeThreshold,
-    score: wakeScore,
-    onWake: onWakeDetected,
-    log: (m) => console.log(m),
-  });
-  if (!wakeEngine.start()) {
-    wakeEngine = null;
-    return false;
-  }
-  if (listenerWin) listenerWin.webContents.send('wake-start');
-  return true;
-}
-
-function stopWakeEngine() {
-  if (listenerWin) listenerWin.webContents.send('wake-stop');
-  if (wakeEngine) wakeEngine.stop();
-  wakeEngine = null;
-  wakeConversation = false;
-}
-
-// Flip wake listening on/off; `persist` writes the choice to config.json.
-function setWakeEnabled(on, persist) {
-  wakeOn = !!on;
-  if (wakeOn) startWakeEngine();
-  else stopWakeEngine();
-  if (persist) patchConfig('wake', { enabled: wakeOn });
-  console.log('[kws] wake ' + (wakeOn ? 'enabled' : 'disabled'));
-}
-
 // ---- Dev-only test bridge (PET_TEST_PORT) ------------------------------------
 //
 // A tiny loopback eval/capture server used by automated tests to drive the real
@@ -1541,7 +1480,9 @@ function startTestBridge() {
           // drag-destination behavior can be tested without a human hand.
           const { nativeImage } = require('electron');
           const icon = nativeImage
-            .createFromPath(path.join(__dirname, 'assets', 'scratch', '01.png'))
+            .createFromPath(
+              path.join(CHARACTERS_DIR, currentCharacterId(), 'scratch', '01.png')
+            )
             .resize({ width: 24 });
           w.webContents.startDrag({ file: js, icon });
           res.end(JSON.stringify({ ok: true }));
@@ -1631,12 +1572,6 @@ app.whenReady().then(() => {
   // Pre-create the (hidden) chat window so push-to-talk pops it instantly.
   createChatWindow();
 
-  // Wake word (section H): hidden listener + offline spotter. Honors the
-  // saved on/off; defaults on (the user asked for always-on "河马河马").
-  createListenerWindow();
-  const { wakeEnabled } = loadKimiConfig();
-  setWakeEnabled(wakeEnabled, false);
-
   // Push-to-talk (section G): a GLOBAL hotkey — hold to record from anywhere.
   // Electron only reports key-DOWN for global shortcuts, so the release is
   // detected by the (now focused) chat renderer via keyup; pressing the hotkey
@@ -1671,7 +1606,6 @@ app.on('before-quit', () => {
 // Tear down the hook server on quit so the port is released cleanly.
 app.on('will-quit', () => {
   if (dragWatcher) dragWatcher.kill();
-  stopWakeEngine();
   globalShortcut.unregisterAll();
   if (claudeServer) {
     try {

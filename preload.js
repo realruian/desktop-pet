@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('pet', {
   getWorkArea: () => ipcRenderer.invoke('get-work-area'), // -> {x, y, width, height}
   // 主动互动初始配置 -> { enabled, minMinutes }
   getIdleChatterConfig: () => ipcRenderer.invoke('get-idle-chatter-config'),
+  // 当前角色 -> { id, name }（启动时决定加载哪套素材）
+  getCharacter: () => ipcRenderer.invoke('get-character'),
   // Resolve the absolute filesystem path of a dropped File (Electron 32+ no
   // longer exposes File.path; webUtils does the lookup from the trusted side).
   getPathForFile: (f) => webUtils.getPathForFile(f),
@@ -28,7 +30,7 @@ contextBridge.exposeInMainWorld('pet', {
   // Main → renderer push -----------------------------------------------------
   onMenuCommand: (cb) => ipcRenderer.on('menu-command', (_e, c) => cb(c)),
   // Global cursor position in screen points, polled by main (~30 Hz). Drives
-  // the resting pet's gaze tracking.
+  // the click-through hit-test (whether the cursor is over the pet's body).
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, p) => cb(p)),
   // Claude Code hook events forwarded by main: { event, cwd } (section D).
   onClaudeEvent: (cb) => ipcRenderer.on('claude-event', (_e, d) => cb(d)),
@@ -40,11 +42,12 @@ contextBridge.exposeInMainWorld('pet', {
   onDropHover: (cb) => ipcRenderer.on('drop-hover', (_e, on) => cb(on)),
   // Relayed from the catcher: a file/folder was dropped on the pet.
   onDropPath: (cb) => ipcRenderer.on('drop-path', (_e, p) => cb(p)),
-  // Wake word heard (section H): bark + perk up as acknowledgement.
-  onWakeBark: (cb) => ipcRenderer.on('wake-bark', () => cb()),
   // 主动互动配置变更（设置面板保存后即时下发）-> { enabled, minMinutes }
   onIdleChatterConfig: (cb) =>
     ipcRenderer.on('idle-chatter-config', (_e, c) => cb(c)),
+  // 右键菜单切换角色 -> { id, name }，渲染层据此热重载素材。
+  onCharacterChange: (cb) =>
+    ipcRenderer.on('character-change', (_e, ch) => cb(ch)),
   // Display sleep/wake reconcile: main pushes the window's true (clamped)
   // position so the renderer re-homes there, fixing post-unlock drift.
   onResyncPos: (cb) => ipcRenderer.on('resync-pos', (_e, p) => cb(p)),

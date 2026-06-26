@@ -17,9 +17,9 @@ contextBridge.exposeInMainWorld('chat', {
   hide: () => ipcRenderer.send('chat-hide'),
   // Push-to-talk: main fires this when the global hotkey is pressed.
   onPTT: (cb) => ipcRenderer.on('ptt-down', () => cb()),
-  // Wake word (section H): main fires this after detecting "河马河马" — start
-  // recording the question with voice-activity auto-send.
-  onWakeListen: (cb) => ipcRenderer.on('wake-listen', () => cb()),
-  // Tell main the wake-triggered question is done recording → resume listening.
-  wakeDone: () => ipcRenderer.send('wake-done'),
+  // 当前角色 -> { id, name }，用于标题/占位/欢迎文案。
+  getCharacter: () => ipcRenderer.invoke('get-character'),
+  // 右键菜单切换角色后，主进程推来新角色名（字符串）。
+  onCharacterName: (cb) =>
+    ipcRenderer.on('character-name', (_e, name) => cb(name)),
 });

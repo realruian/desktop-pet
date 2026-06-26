@@ -4,7 +4,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('settings', {
-  // 读取当前生效的配置（apiKey/model/baseURL/vault/persona/wake 等），返回普通对象
+  // 读取当前生效的配置（apiKey/model/baseURL/vault/persona 等），返回普通对象
   load: () => ipcRenderer.invoke('settings:load'),
   // 保存表单，返回 { ok: true } 或 { ok: false, error }
   save: (patch) => ipcRenderer.invoke('settings:save', patch),

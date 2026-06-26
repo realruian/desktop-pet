@@ -346,7 +346,7 @@ body {
   color: rgba(0, 0, 0, 0.32);
 }
 
-/* ---- 语音唤醒：开关 + 灵敏度 ---- */
+/* ---- 主动互动：开关 + 频率（类名 wakerow 为历史遗留） ---- */
 .wakerow {
   align-items: center;
 }
@@ -411,7 +411,6 @@ body {
   margin-right: 6px;
 }
 
-#wakeThreshold,
 #idleChatterMin {
   width: 64px;
   flex: none;
@@ -425,7 +424,6 @@ body {
   text-align: center;
 }
 
-#wakeThreshold:focus,
 #idleChatterMin:focus {
   border-color: rgba(26, 115, 232, 0.6);
 }
