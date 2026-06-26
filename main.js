@@ -1131,6 +1131,8 @@ ipcMain.handle('chat-send', async (_e, messages) => {
         messages: [...system, ...sane],
         temperature: 0.6,
         max_tokens: 1024,
+        // OpenRouter 联网搜索插件：模型自主判断是否需要搜索，不强制每次都搜。
+        plugins: [{ id: 'web' }],
       }),
       signal: ctrl.signal,
     });
