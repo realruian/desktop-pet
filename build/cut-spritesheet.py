@@ -24,7 +24,8 @@ from PIL import Image
 # ---- 画布/框定常量（与 renderer/pet.js 的 SRC=420 / BASELINE=388 一致）----
 SIZE = 420
 BASELINE = 388
-TARGET_H = 350  # 内容目标高度
+TARGET_H = 350  # 内容目标高度（高度方向归一目标）
+MAX_W = 404     # 内容最大宽度，留边距防超宽角色（帽子+长尾的皮卡丘等）左右溢出被裁
 
 # ---- 精灵表网格（每格 192×208；列数/行数按图尺寸自动推断）----
 CELL_W = 192
@@ -62,7 +63,10 @@ def frame_cell(cell):
     if not bb:
         return None  # 空格子
     content = cell.crop(bb)
-    scale = TARGET_H / (bb[3] - bb[1])
+    # 宽高双约束：内容高≈TARGET_H，但宽度不得超过 MAX_W —— 取更小的缩放比例，
+    # 保证宽角色（帽子+长尾的皮卡丘等）整体完整放进画布、不被左右裁掉。脚仍贴
+    # baseline，所以超宽角色只是整体矮一点，不会溢出。
+    scale = min(TARGET_H / (bb[3] - bb[1]), MAX_W / (bb[2] - bb[0]))
     nw, nh = round(content.width * scale), round(content.height * scale)
     content = content.resize((nw, nh), Image.LANCZOS)
     out = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
