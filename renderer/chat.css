@@ -239,8 +239,8 @@ body {
   max-height: 80px;
   resize: none;
   border-radius: 18px;
-  border: none;
-  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  background: #fff;
   color: rgba(0, 0, 0, 0.88);
   padding: 7px 14px;
   font: inherit;
