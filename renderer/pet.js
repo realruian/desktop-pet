@@ -1594,7 +1594,7 @@ function playDingDone() {
     audioCtx = audioCtx || new AC();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const t = audioCtx.currentTime;
-    // 两声：C5(523Hz)→E5(659Hz)，间隔 0.18s
+    // 两声：C5(523Hz)→E5(659Hz)，间隔 0.18s；音量 0.55 确保在背景音乐中可闻
     [[523, 659, 0], [587, 784, 0.18]].forEach(([f0, f1, delay]) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -1602,7 +1602,7 @@ function playDingDone() {
       osc.frequency.setValueAtTime(f0, t + delay);
       osc.frequency.exponentialRampToValueAtTime(f1, t + delay + 0.08);
       gain.gain.setValueAtTime(0.0001, t + delay);
-      gain.gain.exponentialRampToValueAtTime(0.12, t + delay + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.55, t + delay + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.45);
       osc.connect(gain).connect(audioCtx.destination);
       osc.start(t + delay);

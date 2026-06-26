@@ -17,6 +17,7 @@ const els = {
   idleChatterEnabled: $('idleChatterEnabled'),
   idleChatterMin: $('idleChatterMin'),
   idleChatterLabel: $('idleChatterLabel'),
+  chatHotkey: $('chatHotkey'),
   openFile: $('openFile'),
   test: $('test'),
   save: $('save'),
@@ -90,6 +91,7 @@ function currentPatch() {
     vault: els.vault.value.trim(),
     idleChatterEnabled: els.idleChatterEnabled.checked,
     idleChatterMin: parseInt(els.idleChatterMin.value, 10) || 25,
+    chatHotkey: els.chatHotkey.value,
   };
 }
 
@@ -114,6 +116,7 @@ async function refill() {
     els.idleChatterMin.value =
       cfg.idleChatterMin != null ? cfg.idleChatterMin : 25;
     updateIdleChatterLabel();
+    els.chatHotkey.value = cfg.chatHotkey || 'alt';
     syncPresetActive();
     // 没填真 Key 就让欢迎横幅出来；填好了就藏起来不打扰
     els.welcome.hidden = looksLikeRealKey(cfg.apiKey);

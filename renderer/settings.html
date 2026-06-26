@@ -208,6 +208,17 @@
           </div>
           <span class="hint">冒泡时配一声很轻的「叮」；默认每 25–45 分钟一次（填一个下限分钟数）</span>
         </div>
+
+        <!-- 呼出聊天快捷键：双击修饰键 -->
+        <div class="field">
+          <span class="label">呼出聊天快捷键</span>
+          <select id="chatHotkey">
+            <option value="alt">双击 Option（默认）</option>
+            <option value="meta">双击 Command</option>
+            <option value="none">禁用</option>
+          </select>
+          <span class="hint">在任意应用里快速双击修饰键弹出聊天窗；首次需在系统设置允许辅助功能权限</span>
+        </div>
       </main>
       <footer id="actions">
         <button id="openFile" type="button" title="编辑完整 config.json">

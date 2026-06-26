@@ -538,6 +538,7 @@ function looksLikeRealKey(k) {
 function loadKimiConfig() {
   let cfg = {};
   let obsidian = {};
+  let hotkey = {};
   let idle = {};
   for (const p of CONFIG_PATHS) {
     try {
@@ -545,6 +546,7 @@ function loadKimiConfig() {
       const parsed = JSON.parse(raw) || {};
       cfg = parsed.kimi || {};
       obsidian = parsed.obsidian || {};
+      hotkey = parsed.hotkey || {};
       idle = parsed.idle || {};
       break; // first existing config wins (userData, then repo checkout)
     } catch (_) {
@@ -565,6 +567,8 @@ function loadKimiConfig() {
     // 主动互动：默认开，下限默认 25 分钟（实际触发在 [min, min+20] 随机）
     idleChatterEnabled: idle.enabled !== false,
     idleChatterMin: Number(idle.minMinutes) || 25,
+    // 呼出聊天快捷键：'alt'（双击 Option）/ 'meta'（双击 Command）/ 'none'
+    chatHotkey: process.env.PET_CHAT_HOTKEY || hotkey.chat || 'alt',
   };
 }
 
@@ -708,6 +712,7 @@ ipcMain.handle('settings:load', () => {
     defaultPersona: PERSONA,
     idleChatterEnabled: c.idleChatterEnabled,
     idleChatterMin: c.idleChatterMin,
+    chatHotkey: c.chatHotkey,
   };
 });
 
@@ -744,6 +749,10 @@ ipcMain.handle('settings:save', (_e, patch) => {
       minMinutes:
         Number(patch.idleChatterMin) || parsed.idle?.minMinutes || 25,
     });
+  }
+  // 呼出聊天快捷键：'alt' / 'meta' / 'none'，即时生效（uiohook 每次 keydown 现读）
+  if (patch.chatHotkey) {
+    parsed.hotkey = Object.assign({}, parsed.hotkey, { chat: patch.chatHotkey });
   }
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -1554,6 +1563,50 @@ app.whenReady().then(() => {
 
   // Pre-create the (hidden) chat window so double-click pops it instantly.
   createChatWindow();
+
+  // 全局双击修饰键呼出聊天窗（uiohook-napi 监听全局 keydown）。
+  // 两次按下同一键的间隔 < DOUBLE_TAP_MS 触发；第三次不累计（清零重计）。
+  // chatHotkey 每次 keydown 现读，设置面板改完即时生效无需重启。
+  const DOUBLE_TAP_MS = 350;
+  let lastAltTime = 0;
+  let lastMetaTime = 0;
+  try {
+    const { uIOhook, UiohookKey } = require('uiohook-napi');
+    // 需要辅助功能权限才能监听全局键盘；没有就弹系统设置引导用户授权。
+    if (!systemPreferences.isTrustedAccessibilityClient(false)) {
+      console.log('[hotkey] 辅助功能权限未授权，弹出引导对话框');
+      systemPreferences.isTrustedAccessibilityClient(true); // 弹出系统设置
+    } else {
+      uIOhook.on('keydown', (e) => {
+        const { chatHotkey } = loadKimiConfig();
+        if (chatHotkey === 'none') return;
+        const now = Date.now();
+        const isAlt =
+          e.keycode === UiohookKey.Alt || e.keycode === UiohookKey.AltRight;
+        const isMeta =
+          e.keycode === UiohookKey.Meta || e.keycode === UiohookKey.MetaRight;
+        if (chatHotkey === 'alt' && isAlt) {
+          if (now - lastAltTime < DOUBLE_TAP_MS) {
+            lastAltTime = 0;
+            openChat();
+          } else {
+            lastAltTime = now;
+          }
+        } else if (chatHotkey === 'meta' && isMeta) {
+          if (now - lastMetaTime < DOUBLE_TAP_MS) {
+            lastMetaTime = 0;
+            openChat();
+          } else {
+            lastMetaTime = now;
+          }
+        }
+      });
+      uIOhook.start();
+      console.log('[hotkey] double-tap listener started (uiohook-napi)');
+    }
+  } catch (err) {
+    console.log('[hotkey] uiohook-napi unavailable: ' + err.message);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
