@@ -18,6 +18,7 @@ const els = {
   idleChatterMin: $('idleChatterMin'),
   idleChatterLabel: $('idleChatterLabel'),
   chatHotkey: $('chatHotkey'),
+  diagnostics: $('diagnostics'),
   openFile: $('openFile'),
   test: $('test'),
   save: $('save'),
@@ -35,16 +36,7 @@ const PRESETS = {
 // 内置默认人设（load 时由主进程带回，给「恢复默认」用）。
 let defaultPersona = '';
 
-// 跟主进程的 looksLikeRealKey 同义：挡空/极短串/占位文案，不强制 sk- 前缀。
-function looksLikeRealKey(k) {
-  if (typeof k !== 'string') return false;
-  const s = k.trim();
-  if (s.length < 15) return false;
-  if (/\s/.test(s)) return false;
-  if (/[\u4e00-\u9fff]/.test(s)) return false;
-  if (/你的|占位|示例|example|api\s*key/i.test(s)) return false;
-  return true;
-}
+const { looksLikeRealKey } = window.KeyUtils;
 
 // 模型取值：选「自定义」时读手动输入框，否则读下拉本身。
 function getModelValue() {
@@ -126,6 +118,7 @@ async function refill() {
     syncPresetActive();
     // 没填真 Key 就让欢迎横幅出来；填好了就藏起来不打扰
     els.welcome.hidden = looksLikeRealKey(cfg.apiKey);
+    loadDiagnostics();
   } catch (err) {
     flash('读取失败：' + err.message, true);
   }
@@ -133,6 +126,58 @@ async function refill() {
 refill();
 // 设置窗每次被显示都重新拉，避免外部改过文件之后表单还是旧的
 window.settings.onShown(refill);
+
+function statusText(value) {
+  const map = {
+    listening: '监听中',
+    running: '运行中',
+    stopped: '已停止',
+    'not-started': '未启动',
+    starting: '启动中',
+    unavailable: '不可用',
+    failed: '失败',
+    error: '错误',
+    exited: '已退出',
+    'spawn-failed': '启动失败',
+    'missing-pyobjc': '缺少 pyobjc',
+    'accessibility-needed': '需要辅助功能权限',
+  };
+  return map[value] || value || '未知';
+}
+
+function row(label, value, ok) {
+  const div = document.createElement('div');
+  div.className = 'diagrow';
+  const k = document.createElement('span');
+  k.textContent = label;
+  const v = document.createElement('b');
+  v.textContent = value;
+  if (ok === true) v.className = 'ok';
+  else if (ok === false) v.className = 'bad';
+  div.append(k, v);
+  return div;
+}
+
+async function loadDiagnostics() {
+  try {
+    const d = await window.settings.diagnostics();
+    els.diagnostics.innerHTML = '';
+    els.diagnostics.append(
+      row('配置', d.config.activePath || '未创建', !!d.config.activePath),
+      row('API Key', d.config.hasApiKey ? '已配置' : '未配置', d.config.hasApiKey),
+      row('模型', d.config.model || '未设置', !!d.config.model),
+      row('服务商', d.config.baseURLHost || '未知', !!d.config.baseURLHost),
+      row('笔记库', d.config.vaultConfigured ? (d.config.vaultExists ? '可用' : '路径不存在') : '未配置', !d.config.vaultConfigured || d.config.vaultExists),
+      row('角色', `${d.config.character.name} (${d.config.character.id})`, true),
+      row('Claude Hook', `${statusText(d.integrations.claudeServer)} :${d.integrations.claudePort}`, d.integrations.claudeServer === 'listening'),
+      row('拖拽接驳', statusText(d.integrations.dragWatcher), d.integrations.dragWatcher === 'running'),
+      row('全局热键', statusText(d.integrations.hotkey), d.integrations.hotkey === 'listening'),
+      row('运行模式', d.app.isPackaged ? '已打包' : '开发', true)
+    );
+  } catch (err) {
+    els.diagnostics.textContent = '诊断读取失败：' + err.message;
+  }
+}
 
 // ---- 服务商预设：一键填接口地址 ----
 els.presetOpenRouter.addEventListener('click', () => {
@@ -203,6 +248,7 @@ els.save.addEventListener('click', async () => {
     if (res && res.ok) {
       flash('已保存');
       els.welcome.hidden = looksLikeRealKey(payload.apiKey);
+      loadDiagnostics();
     } else {
       flash('保存失败：' + ((res && res.error) || '未知错误'), true);
     }

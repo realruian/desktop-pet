@@ -45,16 +45,12 @@ const REST_MIN = 6000; // min REST phase duration (ms)
 const REST_MAX = 12000; // max REST phase duration (ms)
 
 // Bond / expression unlocks. 解锁条件：chatCount（累计发消息数）或 taskCount（累计任务完成数）。
-const BOND_STORAGE_KEY = 'hema.bond.v2';
-const BOND_SAVE_EVERY_MS = 3000;
-const EXPRESSION_HOLD_LOOPS = 2;
-const EXPRESSION_UNLOCKS = [
-  { clip: 'tearful',  label: '泪眼婆娑', chatCount: 3  },
-  { clip: 'tearful2', label: '委屈巴巴', chatCount: 10 },
-  { clip: 'tearful3', label: '想贴贴',   taskCount: 5  },
-  { clip: 'tearful4', label: '舍不得你', taskCount: 15 },
-  { clip: 'cheer',    label: '美滋滋',   taskCount: 20 },
-];
+const PetBond = window.PetBond;
+const BOND_STORAGE_KEY = PetBond.STORAGE_KEY;
+const BOND_SAVE_EVERY_MS = PetBond.SAVE_EVERY_MS;
+const EXPRESSION_HOLD_LOOPS = PetBond.EXPRESSION_HOLD_LOOPS;
+const PetSpeech = window.PetSpeech;
+const PetClaude = window.PetClaude;
 
 // Breathing during REST: chest rises/falls, feet planted at the baseline.
 const BREATH_AMT = 0.02; // ±2% vertical scale
@@ -248,7 +244,7 @@ const state = {
   activitiesLeft: 0, // activities remaining in the current ACTIVE phase
   chatCount: 0, // 累计聊天消息数（解锁 tearful 系列）
   taskCount: 0, // 累计 Claude 任务完成数（解锁 tearful3/4 + cheer）
-  unlockedExpressions: new Set(), // clip names from EXPRESSION_UNLOCKS
+  unlockedExpressions: new Set(), // clip names from PetBond.UNLOCKS
   lastBondSave: 0, // performance.now() of the last localStorage write
 };
 
@@ -356,9 +352,7 @@ const frameCount = (clip) =>
     : CLIPS[clip].frames;
 
 function unlockedExpressionWeights() {
-  return EXPRESSION_UNLOCKS.filter((e) =>
-    state.unlockedExpressions.has(e.clip)
-  ).map((e) => ({ name: e.clip, weight: EXPRESSION_WEIGHT }));
+  return PetBond.unlockedExpressionWeights(state, EXPRESSION_WEIGHT);
 }
 
 function pickActivity() {
@@ -374,21 +368,7 @@ function pickActivity() {
 function loadBondState() {
   try {
     const raw = localStorage.getItem(BOND_STORAGE_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    state.chatCount = Math.max(0, Number(saved.chatCount) || 0);
-    state.taskCount = Math.max(0, Number(saved.taskCount) || 0);
-    const unlocked = Array.isArray(saved.unlocked) ? saved.unlocked : [];
-    state.unlockedExpressions = new Set(
-      unlocked.filter((clip) => EXPRESSION_UNLOCKS.some((e) => e.clip === clip))
-    );
-    // 阈值降低时，已赚到的计数仍应解锁对应表情。
-    for (const e of EXPRESSION_UNLOCKS) {
-      const met = e.chatCount !== undefined
-        ? state.chatCount >= e.chatCount
-        : state.taskCount >= e.taskCount;
-      if (met) state.unlockedExpressions.add(e.clip);
-    }
+    PetBond.hydrateState(state, raw);
   } catch (_) {
     state.chatCount = 0;
     state.taskCount = 0;
@@ -400,23 +380,12 @@ function saveBondState(now = performance.now(), force = false) {
   if (!force && now - state.lastBondSave < BOND_SAVE_EVERY_MS) return;
   state.lastBondSave = now;
   try {
-    localStorage.setItem(
-      BOND_STORAGE_KEY,
-      JSON.stringify({
-        chatCount: state.chatCount,
-        taskCount: state.taskCount,
-        unlocked: [...state.unlockedExpressions],
-      })
-    );
+    localStorage.setItem(BOND_STORAGE_KEY, PetBond.serializeState(state));
   } catch (_) {
     /* storage can fail in odd embed modes; unlocks still work for this run */
   }
   // 同步给主进程，右键菜单「亲密度」子菜单据此展示进度。
-  window.pet.reportBond({
-    chatCount: state.chatCount,
-    taskCount: state.taskCount,
-    unlocked: [...state.unlockedExpressions],
-  });
+  window.pet.reportBond(PetBond.summary(state));
 }
 
 function playExpression(clip) {
@@ -445,18 +414,19 @@ function cursorOverDog() {
   );
 }
 
+function cursorNearWindow(pad = 2) {
+  return (
+    latestCursor.x >= state.pos.x - pad &&
+    latestCursor.x <= state.pos.x + WIN + pad &&
+    latestCursor.y >= state.pos.y - pad &&
+    latestCursor.y <= state.pos.y + WIN + pad
+  );
+}
+
 // 检查是否有新的表情因计数达标而解锁（一次只触发一个解锁动画）。
 function checkBondUnlocks(now) {
-  for (const e of EXPRESSION_UNLOCKS) {
-    if (state.unlockedExpressions.has(e.clip)) continue;
-    const met = e.chatCount !== undefined
-      ? state.chatCount >= e.chatCount
-      : state.taskCount >= e.taskCount;
-    if (met) {
-      unlockExpression(e, now);
-      break;
-    }
-  }
+  const e = PetBond.findNewUnlock(state);
+  if (e) unlockExpression(e, now);
 }
 
 function incrementChatCount() {
@@ -500,6 +470,13 @@ function updateInteractivity() {
   if (state.dragging) return; // never toggle ignore mid-drag
   if (osDragActive) return; // main owns the ignore state during system drags
   if (latestCursor.x < 0) return; // no cursor sample yet
+  if (!cursorNearWindow()) {
+    if (currentlyInteractive) {
+      currentlyInteractive = false;
+      window.pet.setIgnore(true);
+    }
+    return;
+  }
   const over = cursorOverDog();
   if (over !== currentlyInteractive) {
     currentlyInteractive = over;
@@ -950,7 +927,7 @@ function runNextActivity() {
     startWalk();
   } else {
     // In-place clips: play briefly, then onActivityDone.
-    const isExpression = EXPRESSION_UNLOCKS.some((e) => e.clip === choice);
+    const isExpression = PetBond.isExpressionClip(choice);
     setClip(choice, {
       loopTarget: isExpression
         ? EXPRESSION_HOLD_LOOPS
@@ -1419,28 +1396,10 @@ function fireClaudeDone(label) {
 // hold/resume transitions. Called after every event and periodically (stale
 // sessions from killed terminals are forgotten).
 function refreshClaude() {
-  const wall = Date.now();
-  for (const [sid, s] of claude.sessions) {
-    if (wall - s.last > SESSION_STALE_MS) claude.sessions.delete(sid);
-  }
-  const all = [...claude.sessions.values()];
-  const waiting = all.filter((s) => s.status === 'waiting');
-  const working = all.filter((s) => s.status === 'working');
-  if (waiting.length) {
-    // Anything waiting for the user beats everything else.
-    claude.display = 'waiting';
-    claude.taskLabel = waiting[waiting.length - 1].label;
-    claude.taskExtra = all.length - 1;
-  } else if (working.length) {
-    working.sort((a, b) => a.last - b.last);
-    claude.display = 'working';
-    claude.taskLabel = working[working.length - 1].label;
-    claude.taskExtra = working.length - 1;
-  } else {
-    claude.display = 'idle';
-    claude.taskLabel = '';
-    claude.taskExtra = 0;
-  }
+  const merged = PetClaude.deriveDisplay(claude.sessions, SESSION_STALE_MS);
+  claude.display = merged.display;
+  claude.taskLabel = merged.taskLabel;
+  claude.taskExtra = merged.taskExtra;
 
   // Hold while sessions are live; resume once the last one is gone (after its
   // done flash has played out).
@@ -1472,15 +1431,6 @@ function refreshClaude() {
 // Forget stale sessions even when no events arrive (e.g. a killed terminal).
 setInterval(refreshClaude, 60 * 1000);
 
-// Derive a session's task label: the prompt text (whitespace collapsed) or,
-// when that's unavailable (pet launched mid-task / Notification-only), the
-// project folder's name from cwd.
-function taskLabelFrom(prompt, cwd) {
-  // 只显示项目目录名——prompt 前几字没有意义，指示器图标已说明状态
-  const parts = (cwd || '').split('/').filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : 'Claude';
-}
-
 window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
   const sid = sessionId || cwd || 'default';
   const wall = Date.now();
@@ -1490,7 +1440,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
       // A turn began (new or existing session) → that session is running.
       claude.sessions.set(sid, {
         status: 'working',
-        label: taskLabelFrom(prompt, cwd),
+        label: PetClaude.taskLabelFrom(prompt, cwd),
         last: wall,
       });
       break;
@@ -1504,7 +1454,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
       } else {
         claude.sessions.set(sid, {
           status: 'working',
-          label: taskLabelFrom(null, cwd),
+          label: PetClaude.taskLabelFrom(null, cwd),
           last: wall,
         });
       }
@@ -1517,7 +1467,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
       } else {
         claude.sessions.set(sid, {
           status: 'waiting',
-          label: taskLabelFrom(null, cwd),
+          label: PetClaude.taskLabelFrom(null, cwd),
           last: wall,
         });
       }
@@ -1525,7 +1475,7 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
     case 'Stop':
       // The turn finished → that task succeeded: done flash + yip.
       claude.sessions.delete(sid);
-      fireClaudeDone(s ? s.label : taskLabelFrom(prompt, cwd));
+      fireClaudeDone(s ? s.label : PetClaude.taskLabelFrom(prompt, cwd));
       break;
     case 'SessionEnd':
       // Terminal/session closed — clear silently (no celebration).
@@ -1544,31 +1494,6 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
 // 每隔 [min, min+20] 分钟随机冒一个 speech 气泡，配一声很轻的「叮」。文案分四类：
 // 久坐提醒 / 关心陪伴 / 卖萌唠嗑 / 按时段问候。屏幕休眠、拖拽、Claude 任务占用
 // 气泡时本轮跳过（直接重排），不打断正在进行的事。
-
-// 文案保持短（气泡单行，最宽约 10 个汉字）。
-const CHATTER = {
-  sit: ['坐久啦，起来动动～', '记得喝口水哦', '伸个懒腰吧！', '抬头远眺一下眼睛'],
-  care: ['今天也辛苦啦', '别太累，我陪着你', '深呼吸，放松一下～', '你已经很棒啦'],
-  cute: ['{name}在偷看你～', '摸摸我嘛', '嘿，被我发现摸鱼', '哼哧哼哧…'],
-};
-
-// 按时段问候：触发时按当前小时挑一池。
-function timeGreeting() {
-  const h = new Date().getHours();
-  if (h < 5) return ['夜深了，早点睡呀', '别熬太晚哦'];
-  if (h < 11) return ['早上好呀！', '新的一天，加油！'];
-  if (h < 14) return ['中午啦，吃饭了吗', '午休一下吧～'];
-  if (h < 18) return ['下午好～', '喝杯茶提提神？'];
-  if (h < 23) return ['晚上好呀', '忙完了吗？歇会儿'];
-  return ['夜深了，早点睡呀', '别熬太晚哦'];
-}
-
-function pickChatter() {
-  const pools = [CHATTER.sit, CHATTER.care, CHATTER.cute, timeGreeting()];
-  const pool = pools[Math.floor(Math.random() * pools.length)];
-  const msg = pool[Math.floor(Math.random() * pool.length)];
-  return msg.replace(/\{name\}/g, charName);
-}
 
 // 很轻的柔和「叮」：Web Audio 合成一个正弦音 + 快速衰减，避免突兀。首个用户手势
 // 之前 AudioContext 可能被挂起，能 resume 就 resume，不行就静默。
@@ -1640,7 +1565,7 @@ function fireChatter() {
     claudeHolding() ||
     performance.now() < claude.doneUntil;
   if (idleChatter.enabled && !busy) {
-    speechBubble.text = pickChatter();
+    speechBubble.text = PetSpeech.pickChatter(charName);
     speechBubble.until = performance.now() + SPEECH_HOLD_MS;
     playDing();
   }

@@ -21,6 +21,9 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { execFile, execFileSync, spawn } = require('child_process');
+const { createConfigStore } = require('./lib/config-store');
+const { buildChatCompletionsBody } = require('./lib/chat-request');
+const { looksLikeRealKey } = require('./shared/key-utils');
 
 // 全局只能有一只桌宠：第二次启动（比如双击已经开着的 .app）会戳一下
 // 第一个实例后直接退出，避免出现两只重叠的桌宠。
@@ -36,12 +39,8 @@ const WIN = 160;
 // config.json's real home is the per-user Application Support dir; the repo's
 // ./config.json still works as a fallback for development checkouts.
 const CONFIG_DIR = app.getPath('userData');
-const CONFIG_PATHS = [
-  path.join(CONFIG_DIR, 'config.json'),
-  // Dev checkout fallback only. A packaged app must never read a bundled
-  // config.json, because that can accidentally ship a developer's local API key.
-  ...(app.isPackaged ? [] : [path.join(__dirname, 'config.json')]),
-];
+const configStore = createConfigStore({ app, baseDir: __dirname });
+const CONFIG_PATHS = configStore.paths;
 
 // Loopback port for the Claude Code hook server (section D). Claude Code's hooks
 // POST their JSON payloads here; we forward the event to the renderer so the pet
@@ -102,16 +101,9 @@ function loadCharacters() {
 // 当前角色 id：config.character.id，默认 hema；目录已不存在则回退第一个可用角色。
 function currentCharacterId() {
   let id = 'hema';
-  for (const p of CONFIG_PATHS) {
-    try {
-      const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (c && c.character && c.character.id) {
-        id = c.character.id;
-        break;
-      }
-    } catch (_) {
-      /* 下一个路径 */
-    }
+  const c = configStore.read().data;
+  if (c && c.character && c.character.id) {
+    id = c.character.id;
   }
   if (!fs.existsSync(path.join(CHARACTERS_DIR, id))) {
     const all = loadCharacters();
@@ -154,10 +146,12 @@ let isQuitting = false;
 // Tracks the menu toggle label state ("paused" vs "walking"). The actual
 // behavior pause lives in the renderer; this only drives the menu text.
 let isPaused = false;
+let hotkeyStatus = 'not-started';
 
 // Claude Code hook server (section D). Held so we can close it on quit.
 /** @type {import('http').Server|null} */
 let claudeServer = null;
+let claudeServerStatus = 'stopped';
 
 // 光标轮询：主进程定时把全局光标位置推给渲染层，驱动像素级点击穿透
 // hit-test（桌宠会走动/呼吸，鼠标不动时也需要持续重判 hover）。
@@ -518,27 +512,7 @@ ipcMain.on('open-in-claude', (_e, p) => {
 });
 
 // 判断一段字符串看起来是不是真的 API Key——不是真 Key 就当成"还没配"。
-// 这是为了挡掉 config.example.json 残留的占位文案（"你的 API Key..."），
-// 挡掉明显的空/极短串、占位文案、误粘的说明文字：拿这个判断「Key 是否填好」
-// （决定要不要弹设置、欢迎横幅）。不强制 sk- 前缀——OpenRouter / AiHubMix /
-// Moonshot 多数是 sk-，但别的服务商不一定，写死前缀会误伤合法 Key。
-function looksLikeRealKey(k) {
-  if (typeof k !== 'string') return false;
-  const s = k.trim();
-  if (s.length < 15) return false;
-  if (/\s/.test(s)) return false;
-  if (/[\u4e00-\u9fff]/.test(s)) return false;
-  if (/你的|占位|示例|example|api\s*key/i.test(s)) return false;
-  return true;
-}
-
-function isOpenRouterBaseURL(baseURL) {
-  try {
-    return new URL(baseURL).hostname.toLowerCase().endsWith('openrouter.ai');
-  } catch (_) {
-    return String(baseURL || '').toLowerCase().includes('openrouter.ai');
-  }
-}
+// 具体规则在 shared/key-utils.js；主进程和设置面板共用，避免判断漂移。
 
 // ---- Kimi chat (section F) ---------------------------------------------------
 //
@@ -551,23 +525,11 @@ function isOpenRouterBaseURL(baseURL) {
 // (OpenRouter, Moonshot direct, …). Env vars override (handy for tests):
 //   PET_KIMI_KEY / PET_KIMI_BASE / PET_KIMI_MODEL / PET_OBSIDIAN_VAULT
 function loadKimiConfig() {
-  let cfg = {};
-  let obsidian = {};
-  let hotkey = {};
-  let idle = {};
-  for (const p of CONFIG_PATHS) {
-    try {
-      const raw = fs.readFileSync(p, 'utf8');
-      const parsed = JSON.parse(raw) || {};
-      cfg = parsed.kimi || {};
-      obsidian = parsed.obsidian || {};
-      hotkey = parsed.hotkey || {};
-      idle = parsed.idle || {};
-      break; // first existing config wins (userData, then repo checkout)
-    } catch (_) {
-      /* try the next location; none → env/defaults */
-    }
-  }
+  const parsed = configStore.read().data;
+  const cfg = parsed.kimi || {};
+  const obsidian = parsed.obsidian || {};
+  const hotkey = parsed.hotkey || {};
+  const idle = parsed.idle || {};
   return {
     apiKey: process.env.PET_KIMI_KEY || cfg.apiKey || '',
     // 人设：用户在设置面板填了就用，留空回退到内置默认 PERSONA；
@@ -591,20 +553,8 @@ function loadKimiConfig() {
 // userData if needed), preserving everything else. Used by the character-switch
 // menu so the choice survives restarts.
 function patchConfig(section, patch) {
-  const target = CONFIG_PATHS[0]; // userData/config.json — the writable home
-  let parsed = {};
-  for (const p of CONFIG_PATHS) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(p, 'utf8')) || {};
-      break;
-    } catch (_) {
-      /* none yet */
-    }
-  }
-  parsed[section] = Object.assign({}, parsed[section], patch);
   try {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
+    configStore.patch(section, patch);
   } catch (err) {
     console.log('[cfg] could not persist ' + section + ': ' + err.message);
   }
@@ -614,10 +564,7 @@ function patchConfig(section, patch) {
 // 如果已经存在 config.json，就覆盖它（避免出现"写到 A 但读 B"的分裂状态）；
 // 都不存在时再按场景新建：开发模式落仓库根方便 git diff，打包模式落 userData。
 function preferredConfigPath() {
-  for (const p of CONFIG_PATHS) {
-    if (fs.existsSync(p)) return p;
-  }
-  return app.isPackaged ? CONFIG_PATHS[0] : CONFIG_PATHS[1];
+  return configStore.preferredPath();
 }
 
 // 「设置」面板里的"高级 → 打开文件"按钮会调到这里。
@@ -710,14 +657,7 @@ ipcMain.handle('settings:load', () => {
   // persona 回填「用户实际填的原始值」（空＝用默认），不能用 c.persona（已回退默认）；
   // 另附 defaultPersona 全文，供面板「恢复默认」把默认人设填进去再改。
   let rawPersona = '';
-  for (const p of CONFIG_PATHS) {
-    try {
-      rawPersona = (JSON.parse(fs.readFileSync(p, 'utf8')).kimi || {}).persona || '';
-      break;
-    } catch (_) {
-      /* 没有就当空 */
-    }
-  }
+  rawPersona = (configStore.read().data.kimi || {}).persona || '';
   return {
     apiKey: c.apiKey,
     model: c.model,
@@ -731,21 +671,63 @@ ipcMain.handle('settings:load', () => {
   };
 });
 
+function hostFromURL(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (_) {
+    return '';
+  }
+}
+
+ipcMain.handle('settings:diagnostics', () => {
+  const cfg = loadKimiConfig();
+  const active = configStore.read().path;
+  return {
+    app: {
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+    },
+    config: {
+      userData: CONFIG_DIR,
+      activePath: active || '',
+      paths: CONFIG_PATHS.map((p) => ({
+        path: p,
+        exists: fs.existsSync(p),
+        active: p === active,
+      })),
+      hasApiKey: looksLikeRealKey(cfg.apiKey),
+      model: cfg.model,
+      baseURLHost: hostFromURL(cfg.baseURL),
+      vaultConfigured: !!cfg.vault,
+      vaultExists: !!cfg.vault && fs.existsSync(cfg.vault),
+      character: {
+        id: currentCharacterId(),
+        name: currentCharacterName(),
+      },
+    },
+    integrations: {
+      claudeServer: claudeServerStatus,
+      claudePort: CLAUDE_PORT,
+      dragWatcher: dragWatcherStatus,
+      dragPython: cachedPython || '',
+      hotkey: hotkeyStatus,
+    },
+    windows: {
+      pet: !!(win && !win.isDestroyed()),
+      chat: !!(chatWin && !chatWin.isDestroyed()),
+      settings: !!(settingsWin && !settingsWin.isDestroyed()),
+    },
+  };
+});
+
 // 写回配置：合并而非覆盖，保留未涉及的字段不动。
 ipcMain.handle('settings:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') {
     return { ok: false, error: '空表单' };
   }
   const target = preferredConfigPath();
-  let parsed = {};
-  for (const p of CONFIG_PATHS) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(p, 'utf8')) || {};
-      break;
-    } catch (_) {
-      /* 没有就当空 */
-    }
-  }
+  const parsed = configStore.read().data;
   parsed.kimi = Object.assign({}, parsed.kimi, {
     apiKey: patch.apiKey || '',
     model: patch.model || parsed.kimi?.model || 'qwen/qwen3-235b-a22b-2507',
@@ -770,8 +752,7 @@ ipcMain.handle('settings:save', (_e, patch) => {
     parsed.hotkey = Object.assign({}, parsed.hotkey, { chat: patch.chatHotkey });
   }
   try {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, JSON.stringify(parsed, null, 2));
+    configStore.write(parsed, target);
     // 主动互动配置即时推给桌宠（重排定时器）
     if (win && !win.isDestroyed()) {
       win.webContents.send('idle-chatter-config', {
@@ -1135,16 +1116,13 @@ ipcMain.handle('chat-send', async (_e, messages) => {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const requestBody = {
+    const requestBody = buildChatCompletionsBody({
+      baseURL,
       model,
       messages: [...system, ...sane],
       temperature: 0.6,
-      max_tokens: 1024,
-    };
-    if (isOpenRouterBaseURL(baseURL)) {
-      // OpenRouter 联网搜索插件：模型自主判断是否需要搜索，不强制每次都搜。
-      requestBody.plugins = [{ id: 'web' }];
-    }
+      maxTokens: 1024,
+    });
     const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST',
       headers: {
@@ -1198,6 +1176,7 @@ const HOOK_DEDUPE_MS = 600;
 
 function startClaudeServer() {
   try {
+    claudeServerStatus = 'starting';
     claudeServer = http.createServer((req, res) => {
       if (req.method === 'POST' && req.url === '/hook') {
         let body = '';
@@ -1261,14 +1240,17 @@ function startClaudeServer() {
     // A busy port (another pet instance, say) must not be fatal.
     claudeServer.on('error', (err) => {
       console.log('[claude] hook server unavailable: ' + err.message);
+      claudeServerStatus = 'unavailable';
       claudeServer = null;
     });
 
     claudeServer.listen(CLAUDE_PORT, '127.0.0.1', () => {
+      claudeServerStatus = 'listening';
       console.log('[claude] hook server listening on 127.0.0.1:' + CLAUDE_PORT);
     });
   } catch (err) {
     console.log('[claude] hook server failed to start: ' + err.message);
+    claudeServerStatus = 'failed';
     claudeServer = null;
   }
 }
@@ -1301,6 +1283,7 @@ let dragWatcher = null;
 let systemDragActive = false;
 let dropCatcher = null;
 let catcherHideTimer = null;
+let dragWatcherStatus = 'not-started';
 
 function createDropCatcher() {
   dropCatcher = new BrowserWindow({
@@ -1423,6 +1406,7 @@ function startDragWatcher() {
   const python = findPython();
   if (!python) {
     console.log('[drag] no python with pyobjc — drops disabled');
+    dragWatcherStatus = 'missing-pyobjc';
     notifyDragDep();
     return;
   }
@@ -1430,8 +1414,10 @@ function startDragWatcher() {
     dragWatcher = spawn(python, ['-u', '-c', py], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
+    dragWatcherStatus = 'running';
   } catch (err) {
     console.log('[drag] watcher spawn failed: ' + err.message);
+    dragWatcherStatus = 'spawn-failed';
     return;
   }
   dragWatcher.stdout.on('data', (chunk) => {
@@ -1443,10 +1429,12 @@ function startDragWatcher() {
   dragWatcher.on('error', (err) => {
     console.log('[drag] watcher unavailable: ' + err.message);
     dragWatcher = null;
+    dragWatcherStatus = 'error';
   });
   dragWatcher.on('exit', (code) => {
     console.log('[drag] watcher exited (' + code + ') — drops disabled');
     dragWatcher = null;
+    dragWatcherStatus = code === 1 ? 'missing-pyobjc' : 'exited';
     setSystemDragActive(false);
     // 退出码 1 几乎都是缺 python3 的 pyobjc（import Quartz/AppKit 失败）：拖文件
     // 起终端整功能失效。首次发生弹一次通知引导安装，之后不再打扰。
@@ -1481,7 +1469,13 @@ function startTestBridge() {
       try {
         const { op, target, js } = JSON.parse(body || '{}');
         const w =
-          target === 'chat' ? chatWin : target === 'catcher' ? dropCatcher : win;
+          target === 'chat'
+            ? chatWin
+            : target === 'settings'
+              ? settingsWin
+              : target === 'catcher'
+                ? dropCatcher
+                : win;
         if (!w) throw new Error('window not ready');
         if (op === 'eval') {
           const result = await w.webContents.executeJavaScript(js, true);
@@ -1599,6 +1593,7 @@ app.whenReady().then(() => {
     // 需要辅助功能权限才能监听全局键盘；没有就弹系统设置引导用户授权。
     if (!systemPreferences.isTrustedAccessibilityClient(false)) {
       console.log('[hotkey] 辅助功能权限未授权，弹出引导对话框');
+      hotkeyStatus = 'accessibility-needed';
       systemPreferences.isTrustedAccessibilityClient(true); // 弹出系统设置
     } else {
       uIOhook.on('keydown', (e) => {
@@ -1626,9 +1621,11 @@ app.whenReady().then(() => {
         }
       });
       uIOhook.start();
+      hotkeyStatus = 'listening';
       console.log('[hotkey] double-tap listener started (uiohook-napi)');
     }
   } catch (err) {
+    hotkeyStatus = 'unavailable';
     console.log('[hotkey] uiohook-napi unavailable: ' + err.message);
   }
 
@@ -1645,6 +1642,7 @@ app.on('before-quit', () => {
 // Tear down the hook server on quit so the port is released cleanly.
 app.on('will-quit', () => {
   if (dragWatcher) dragWatcher.kill();
+  dragWatcherStatus = 'stopped';
   globalShortcut.unregisterAll();
   if (claudeServer) {
     try {
@@ -1654,6 +1652,8 @@ app.on('will-quit', () => {
     }
     claudeServer = null;
   }
+  claudeServerStatus = 'stopped';
+  hotkeyStatus = 'stopped';
 });
 
 // Quit when all windows are closed (overlay pet has no reason to linger).

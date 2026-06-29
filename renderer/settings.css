@@ -447,3 +447,48 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---- 诊断 ---- */
+.diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.025);
+  user-select: text;
+}
+
+.diagrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.diagrow span {
+  flex: none;
+  width: 62px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.diagrow b {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.72);
+  font-weight: 500;
+}
+
+.diagrow b.ok {
+  color: rgba(30, 140, 70, 0.95);
+}
+
+.diagrow b.bad {
+  color: #c5221f;
+}

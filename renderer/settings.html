@@ -215,6 +215,11 @@
           </select>
           <span class="hint">在任意应用里快速双击修饰键弹出聊天窗；首次需在系统设置允许辅助功能权限</span>
         </div>
+
+        <div class="field">
+          <span class="label">诊断</span>
+          <div id="diagnostics" class="diagnostics"></div>
+        </div>
       </main>
       <footer id="actions">
         <button id="openFile" type="button" title="编辑完整 config.json">
@@ -225,6 +230,7 @@
         <button id="save" type="button">保存</button>
       </footer>
     </div>
+    <script src="../shared/key-utils.js"></script>
     <script src="settings.js"></script>
   </body>
 </html>

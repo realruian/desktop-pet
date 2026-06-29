@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('settings', {
   test: (patch) => ipcRenderer.invoke('settings:test', patch),
   // 拉该服务商可用的模型列表，{ ok, models:[id] } 或 { ok:false, error }
   listModels: (patch) => ipcRenderer.invoke('settings:list-models', patch),
+  // 运行状态诊断快照（不包含 API Key 原文）
+  diagnostics: () => ipcRenderer.invoke('settings:diagnostics'),
   // 弹原生目录选择器，返回选中的路径或空串
   pickVault: () => ipcRenderer.invoke('settings:pick-vault'),
   // 用系统默认编辑器打开 config.json（高级入口）
