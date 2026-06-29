@@ -65,6 +65,7 @@ async function sendMessage() {
 
   addBubble('user', text);
   history.push({ role: 'user', content: text });
+  window.chat.reportUserMessage();
 
   sending = true;
   sendEl.disabled = true;

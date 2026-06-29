@@ -38,7 +38,9 @@ const WIN = 160;
 const CONFIG_DIR = app.getPath('userData');
 const CONFIG_PATHS = [
   path.join(CONFIG_DIR, 'config.json'),
-  path.join(__dirname, 'config.json'),
+  // Dev checkout fallback only. A packaged app must never read a bundled
+  // config.json, because that can accidentally ship a developer's local API key.
+  ...(app.isPackaged ? [] : [path.join(__dirname, 'config.json')]),
 ];
 
 // Loopback port for the Claude Code hook server (section D). Claude Code's hooks
@@ -517,12 +519,25 @@ ipcMain.on('open-in-claude', (_e, p) => {
 
 // 判断一段字符串看起来是不是真的 API Key——不是真 Key 就当成"还没配"。
 // 这是为了挡掉 config.example.json 残留的占位文案（"你的 API Key..."），
-// 只挡明显的空/极短串：拿这个判断「Key 是否填好」（决定要不要弹设置、欢迎横幅）。
-// 不再强制 sk- 前缀——OpenRouter / AiHubMix / Moonshot 多数是 sk-，但别的服务商
-// 不一定，写死前缀会把合法 Key 误判成「没填」，反而更不友好。
+// 挡掉明显的空/极短串、占位文案、误粘的说明文字：拿这个判断「Key 是否填好」
+// （决定要不要弹设置、欢迎横幅）。不强制 sk- 前缀——OpenRouter / AiHubMix /
+// Moonshot 多数是 sk-，但别的服务商不一定，写死前缀会误伤合法 Key。
 function looksLikeRealKey(k) {
   if (typeof k !== 'string') return false;
-  return k.trim().length >= 15;
+  const s = k.trim();
+  if (s.length < 15) return false;
+  if (/\s/.test(s)) return false;
+  if (/[\u4e00-\u9fff]/.test(s)) return false;
+  if (/你的|占位|示例|example|api\s*key/i.test(s)) return false;
+  return true;
+}
+
+function isOpenRouterBaseURL(baseURL) {
+  try {
+    return new URL(baseURL).hostname.toLowerCase().endsWith('openrouter.ai');
+  } catch (_) {
+    return String(baseURL || '').toLowerCase().includes('openrouter.ai');
+  }
 }
 
 // ---- Kimi chat (section F) ---------------------------------------------------
@@ -1069,6 +1084,12 @@ ipcMain.on('chat-hide', () => {
   if (chatWin) chatWin.hide();
 });
 
+ipcMain.on('chat-user-message', () => {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('chat-user-message');
+  }
+});
+
 // Round-trip one conversation to Kimi. `messages` is the renderer's history
 // ({role:'user'|'assistant', content} only — we prepend the persona here).
 // Resolves {ok:true, content} | {ok:false, error}; never throws to the caller.
@@ -1114,20 +1135,23 @@ ipcMain.handle('chat-send', async (_e, messages) => {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
   try {
+    const requestBody = {
+      model,
+      messages: [...system, ...sane],
+      temperature: 0.6,
+      max_tokens: 1024,
+    };
+    if (isOpenRouterBaseURL(baseURL)) {
+      // OpenRouter 联网搜索插件：模型自主判断是否需要搜索，不强制每次都搜。
+      requestBody.plugins = [{ id: 'web' }];
+    }
     const resp = await fetch(baseURL.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: 'Bearer ' + apiKey,
       },
-      body: JSON.stringify({
-        model,
-        messages: [...system, ...sane],
-        temperature: 0.6,
-        max_tokens: 1024,
-        // OpenRouter 联网搜索插件：模型自主判断是否需要搜索，不强制每次都搜。
-        plugins: [{ id: 'web' }],
-      }),
+      body: JSON.stringify(requestBody),
       signal: ctrl.signal,
     });
     const data = await resp.json().catch(() => ({}));

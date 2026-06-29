@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('chat', {
   // Send the conversation (array of {role, content}) to Kimi via main.
   // Resolves to { ok: true, content } or { ok: false, error }.
   send: (messages) => ipcRenderer.invoke('chat-send', messages),
+  // Count one user-authored chat message for the pet's bond/unlock system.
+  reportUserMessage: () => ipcRenderer.send('chat-user-message'),
   // Hide the panel (✕ button / Esc).
   hide: () => ipcRenderer.send('chat-hide'),
   // 当前角色 -> { id, name }，用于标题/占位/欢迎文案。

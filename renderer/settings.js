@@ -35,9 +35,15 @@ const PRESETS = {
 // 内置默认人设（load 时由主进程带回，给「恢复默认」用）。
 let defaultPersona = '';
 
-// 跟主进程的 looksLikeRealKey 同义：只挡空/极短串，不强制 sk- 前缀。
+// 跟主进程的 looksLikeRealKey 同义：挡空/极短串/占位文案，不强制 sk- 前缀。
 function looksLikeRealKey(k) {
-  return typeof k === 'string' && k.trim().length >= 15;
+  if (typeof k !== 'string') return false;
+  const s = k.trim();
+  if (s.length < 15) return false;
+  if (/\s/.test(s)) return false;
+  if (/[\u4e00-\u9fff]/.test(s)) return false;
+  if (/你的|占位|示例|example|api\s*key/i.test(s)) return false;
+  return true;
 }
 
 // 模型取值：选「自定义」时读手动输入框，否则读下拉本身。
@@ -191,11 +197,6 @@ els.test.addEventListener('click', async () => {
 // ---- 保存 ----
 els.save.addEventListener('click', async () => {
   const payload = currentPatch();
-  if (!payload.apiKey) {
-    flash('API Key 不能为空', true);
-    els.apiKey.focus();
-    return;
-  }
   els.save.disabled = true;
   try {
     const res = await window.settings.save(payload);

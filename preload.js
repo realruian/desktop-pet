@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('pet', {
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, p) => cb(p)),
   // Claude Code hook events forwarded by main: { event, cwd } (section D).
   onClaudeEvent: (cb) => ipcRenderer.on('claude-event', (_e, d) => cb(d)),
+  // 聊天窗里用户发出一条消息：用于亲密度聊天计数。
+  onChatUserMessage: (cb) =>
+    ipcRenderer.on('chat-user-message', () => cb()),
   // System file-drag started/ended anywhere on the machine (section E). The
   // pet keeps ignoring mouse events during the drag; the catcher window
   // shown at its bounds is what actually receives the drop.

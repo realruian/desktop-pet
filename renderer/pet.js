@@ -888,6 +888,14 @@ function stepWalk(dt) {
     return;
   }
   const step = WALK_SPEED * dt;
+  if (step >= d) {
+    state.pos.x = to.x;
+    state.pos.y = to.y;
+    window.pet.moveTo(to.x, to.y);
+    walkTarget = null;
+    onActivityDone();
+    return;
+  }
   const nx = state.pos.x + ((to.x - state.pos.x) / d) * step;
   const ny = state.pos.y + ((to.y - state.pos.y) / d) * step;
   state.pos.x = nx;
@@ -1092,6 +1100,9 @@ async function endDrag(e) {
   // Resync local position from the source of truth (the window itself).
   const [wx, wy] = await window.pet.getPos();
   state.pos = { x: wx, y: wy };
+  if (moved) {
+    state.home = { x: wx, y: wy };
+  }
 
   if (state.paused) {
     // Paused: settle straight into REST, no scheduling.
@@ -1115,7 +1126,6 @@ async function endDrag(e) {
   } else {
     // A real drag: wherever you put the pet down is its new home. Settle, then
     // resume the rest/active cycle after a short beat.
-    state.home = { x: wx, y: wy };
     setClip(REST);
     state.resumeTimer = setTimeout(() => {
       enterRest();
@@ -1483,7 +1493,6 @@ window.pet.onClaudeEvent(({ event, cwd, prompt, sessionId }) => {
         label: taskLabelFrom(prompt, cwd),
         last: wall,
       });
-      incrementChatCount(); // 每次发消息计一次聊天，累计解锁 tearful 系列
       break;
     case 'PostToolUse':
       // Tool activity proves the session is running (also flips a 'waiting'
@@ -1651,6 +1660,10 @@ window.pet.onCharacterChange((ch) => {
   if (!ch || !ch.id) return;
   if (ch.name) charName = ch.name;
   switchCharacter(ch.id);
+});
+
+window.pet.onChatUserMessage(() => {
+  incrementChatCount();
 });
 
 // ---- Boot -------------------------------------------------------------------

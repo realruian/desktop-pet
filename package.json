@@ -4,7 +4,8 @@
   "description": "A multi-character pixel desktop pet for macOS (Electron): swap skins from a right-click menu (hippo, Pikachu, Luffy, Zoro, etc.), draggable, wanders randomly, transparent click-through window, with a Claude Code status bubble.",
   "main": "main.js",
   "scripts": {
-    "start": "env -u ELECTRON_RUN_AS_NODE electron ."
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "build": "electron-packager . HemaDesktopPet --platform=darwin --arch=arm64 --icon=assets/app-icon.icns --out=dist --overwrite --app-bundle-id=com.tianruian.hemadesktoppet --ignore='^/dist($|/)' --ignore='^/\\.git($|/)' --ignore='^/config\\.json$' --ignore='^/\\.env(\\..*)?$' --ignore='\\.(pem|key)$' --ignore='^/COURSE_OPERATION_GUIDE\\.md$' --ignore='^/SPEC2?\\.md$' && cp assets/app-icon.icns dist/HemaDesktopPet-darwin-arm64/HemaDesktopPet.app/Contents/Resources/electron.icns && touch dist/HemaDesktopPet-darwin-arm64/HemaDesktopPet.app"
   },
   "license": "MIT",
   "devDependencies": {
